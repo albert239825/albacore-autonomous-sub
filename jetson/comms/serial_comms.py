@@ -1,4 +1,9 @@
-"""Serial communication wrapper for Jetson <-> Teensy links."""
+"""Blocking line I/O over USB serial to a Teensy.
+
+Uses pyserial with a short read timeout so ``readline`` / ``read_message`` do not
+block indefinitely—call from a dedicated reader thread and drain often. One
+``SerialComms`` instance per port (control vs audio).
+"""
 
 from __future__ import annotations
 
@@ -13,6 +18,8 @@ from .protocol import CmdMsg, ParsedMessage, parse_line, serialize
 
 @dataclass(slots=True)
 class SerialStats:
+    """Lightweight counters for debugging link health."""
+
     rx_lines: int = 0
     tx_lines: int = 0
     parse_failures: int = 0
@@ -21,6 +28,8 @@ class SerialStats:
 
 
 class SerialComms:
+    """Open a serial port, send ``CMD`` lines, read parsed telemetry/audio lines."""
+
     def __init__(self, port: str, baud: int, timeout_s: float = 0.01) -> None:
         self.port = port
         self.baud = baud
@@ -29,6 +38,7 @@ class SerialComms:
         self.stats = SerialStats()
 
     def connect(self) -> None:
+        """Open the port and flush OS buffers."""
         self.ser = serial.Serial(self.port, self.baud, timeout=self.timeout_s)
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
@@ -41,6 +51,7 @@ class SerialComms:
             self.ser.close()
 
     def send_line(self, line: str) -> None:
+        """Send a UTF-8 line (``serialize()`` appends the newline)."""
         if not self.is_connected():
             return
         assert self.ser is not None
@@ -49,9 +60,11 @@ class SerialComms:
         self.stats.last_tx_time = time.time()
 
     def send_cmd(self, cmd: CmdMsg) -> None:
+        """Serialize and send a ``CMD`` message."""
         self.send_line(serialize(cmd))
 
     def read_raw_line(self) -> Optional[str]:
+        """Read one newline-terminated line, or ``None`` if none available."""
         if not self.is_connected():
             return None
         assert self.ser is not None
@@ -69,6 +82,7 @@ class SerialComms:
         return line
 
     def read_message(self) -> Optional[ParsedMessage]:
+        """Parse a line into a typed message; malformed lines increment ``parse_failures``."""
         line = self.read_raw_line()
         if line is None:
             return None

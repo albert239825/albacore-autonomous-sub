@@ -1,4 +1,11 @@
-"""Mock serial-like comms interface for hardware-free development."""
+"""Fake Teensy links for development without USB hardware.
+
+``MockComms`` mirrors ``SerialComms`` method names: ``connect``, ``send_cmd``,
+``read_message``, ``close``. Use ``role="control"`` for IMU/USS/BAT/DEP at
+``telemetry_hz``, or ``role="audio"`` for continuous ``AUD`` lines. Synthetic
+audio uses per-channel phase offsets to exercise TDOA; optional broadband
+jitter mimics propeller-like noise.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +21,8 @@ from .protocol import AudMsg, BatMsg, CmdMsg, DepMsg, ImuMsg, ParsedMessage, Uss
 
 @dataclass(slots=True)
 class MockAudioConfig:
+    """Tunable fake hydrophone stream (12-bit centered ~2048)."""
+
     sample_rate_hz: int = 20_000
     tone_hz: float = 500.0
     amplitude: float = 1700.0
@@ -22,7 +31,7 @@ class MockAudioConfig:
 
 
 class MockComms:
-    """Duck-typed replacement for SerialComms with the same main methods."""
+    """Duck-typed replacement for ``SerialComms`` (same main methods)."""
 
     def __init__(self, role: str, telemetry_hz: float = 20.0, audio_config: Optional[MockAudioConfig] = None) -> None:
         self.role = role
@@ -47,14 +56,17 @@ class MockComms:
         return self.connected
 
     def send_line(self, line: str) -> None:
+        """Accept ``CMD`` lines to update internal command state (watchdog stand-in)."""
         msg = parse_line(line)
         if isinstance(msg, CmdMsg):
             self._cmd = msg
 
     def send_cmd(self, cmd: CmdMsg) -> None:
+        """Store latest command (real firmware would PWM from this)."""
         self._cmd = cmd
 
     def _enqueue_control_telemetry(self) -> None:
+        """Push one cycle of fake IMU, USS, BAT, DEP as serialized lines."""
         now = time.time()
         t = now - self._start
         yaw_rate = 5.0 * math.sin(0.3 * t)
@@ -67,7 +79,7 @@ class MockComms:
             gz=yaw_rate,
         )
 
-        near_front = random.random() < 0.07
+        near_front = random.random() < 0.07  # occasional obstacle ahead
         uss = UssMsg(
             top_cm=random.randint(60, 200),
             left_cm=random.randint(30, 200),
@@ -75,6 +87,7 @@ class MockComms:
             front_cm=random.randint(20, 50) if near_front else random.randint(60, 220),
         )
 
+        # Slow drain toward 11.0 V floor (step sized per telemetry tick).
         self._battery_v = max(11.0, self._battery_v - 0.001 * (1.0 / self.telemetry_hz))
         bat = BatMsg(self._battery_v)
 
@@ -84,6 +97,7 @@ class MockComms:
             self._line_buffer.append(serialize(msg))
 
     def _enqueue_audio_samples(self) -> None:
+        """Catch up sample count from wall time so bursty reads still see ~Fs."""
         dt = 1.0 / float(self.audio_config.sample_rate_hz)
         now = time.time()
         elapsed = now - self._last_audio
@@ -93,7 +107,6 @@ class MockComms:
         self._last_audio = now
 
         for _ in range(sample_count):
-            base_phase = 2.0 * math.pi * self.audio_config.tone_hz * (self._sample_idx * dt)
             ch_vals = []
             for offset in self.audio_config.offsets:
                 delayed_phase = 2.0 * math.pi * self.audio_config.tone_hz * ((self._sample_idx - offset) * dt)
@@ -104,10 +117,10 @@ class MockComms:
                         tone += random.uniform(-500.0, 500.0)
                 ch_vals.append(int(max(0, min(4095, tone))))
             self._sample_idx += 1
-            _ = base_phase
             self._line_buffer.append(serialize(AudMsg(ch_vals[0], ch_vals[1], ch_vals[2], ch_vals[3])))
 
     def _pump(self) -> None:
+        """Fill internal queue according to ``role`` before reads."""
         if not self.connected:
             return
         now = time.time()

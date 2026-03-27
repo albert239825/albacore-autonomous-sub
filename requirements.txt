@@ -1,3 +1,14 @@
+# Albacore — Python dependencies (Jetson stack, laptop controller, scripts).
+# Install from repository root: pip install -r requirements.txt
+#
+# pyserial     USB serial to Teensys
+# numpy        arrays, audio/TDOA
+# opencv-python camera + visualization in vision.detector
+# ultralytics  YOLOv8 (downloads weights on first run)
+# tensorflow + tensorflow-hub  YAMNet classifier
+# scipy        WAV I/O, resampling in classifier
+# pygame       laptop/controller.py input
+
 pyserial>=3.5
 numpy>=1.24
 opencv-python>=4.8

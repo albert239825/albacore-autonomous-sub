@@ -1,4 +1,9 @@
-"""Communication helpers for Jetson serial and UDP links."""
+"""Jetson comms package: Teensy serial protocol, real + mock links.
+
+Exports message types and helpers used by ``main.py``, scripts, and tests.
+``SerialComms`` talks to hardware; ``MockComms`` mimics the same call pattern
+for laptop-only development (``--mock`` on the orchestrator).
+"""
 
 from .mock_comms import MockComms
 from .protocol import (

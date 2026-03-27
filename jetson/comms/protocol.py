@@ -1,4 +1,13 @@
-"""ASCII line protocol helpers for UDP and serial links."""
+"""ASCII line protocol: parse and serialize Teensy + laptop messages.
+
+Wire format: ``MSG_TYPE,field1,field2,...\\n`` (newline-terminated). Used for:
+
+- Jetson ↔ Control Teensy serial (``CMD`` out; ``IMU``, ``USS``, ``BAT``, ``DEP`` in).
+- Audio Teensy → Jetson (``AUD``).
+- Laptop ↔ Jetson UDP (``CMD``, ``MODE``, ``ESTOP`` in; relayed telemetry + ``STATE`` out).
+
+``clamp_cmd`` enforces actuator limits before sending ``CMD`` to firmware.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +17,8 @@ from typing import Optional, Union
 
 @dataclass(slots=True)
 class CmdMsg:
+    """Actuator command: thruster %, fin angles (deg), ballast (-1 ascend, 0 stop, 1 descend)."""
+
     thruster_pct: int
     rudder_deg: int
     elevator_deg: int
@@ -16,6 +27,8 @@ class CmdMsg:
 
 @dataclass(slots=True)
 class ImuMsg:
+    """IMU: accel (m/s²) then gyro (deg/s), axis order x, y, z."""
+
     ax: float
     ay: float
     az: float
@@ -26,6 +39,8 @@ class ImuMsg:
 
 @dataclass(slots=True)
 class UssMsg:
+    """Ultrasonic ranges in cm (top, left, right, front)."""
+
     top_cm: int
     left_cm: int
     right_cm: int
@@ -34,16 +49,22 @@ class UssMsg:
 
 @dataclass(slots=True)
 class BatMsg:
+    """Battery voltage (V) from Teensy ADC / divider."""
+
     voltage: float
 
 
 @dataclass(slots=True)
 class DepMsg:
+    """Depth below surface (m); 0.0 if sensor absent or not initialized."""
+
     depth_m: float
 
 
 @dataclass(slots=True)
 class AudMsg:
+    """One 12-bit ADC sample per hydrophone channel (0–4095)."""
+
     ch0: int
     ch1: int
     ch2: int
@@ -52,16 +73,22 @@ class AudMsg:
 
 @dataclass(slots=True)
 class ModeMsg:
+    """High-level Jetson mode from laptop (e.g. MANUAL, AUTO_WAYPOINT, AUTO_TRACK)."""
+
     mode: str
 
 
 @dataclass(slots=True)
 class EStopMsg:
+    """Emergency stop: firmware maps to kill thrust + ballast ascend."""
+
     active: bool = True
 
 
 @dataclass(slots=True)
 class StateMsg:
+    """Dashboard line: mode, last vision class/confidence, TDOA bearing (deg)."""
+
     mode: str
     det_class: str
     det_conf: float
@@ -72,6 +99,7 @@ ParsedMessage = Union[CmdMsg, ImuMsg, UssMsg, BatMsg, DepMsg, AudMsg, ModeMsg, E
 
 
 def serialize(msg: ParsedMessage) -> str:
+    """Return a single ASCII line including trailing newline."""
     if isinstance(msg, CmdMsg):
         return f"CMD,{msg.thruster_pct},{msg.rudder_deg},{msg.elevator_deg},{msg.ballast_dir}\n"
     if isinstance(msg, ImuMsg):
@@ -94,6 +122,7 @@ def serialize(msg: ParsedMessage) -> str:
 
 
 def parse_line(line: str) -> Optional[ParsedMessage]:
+    """Parse one stripped line; return ``None`` if empty or unrecognized."""
     line = line.strip()
     if not line:
         return None
@@ -124,6 +153,7 @@ def parse_line(line: str) -> Optional[ParsedMessage]:
 
 
 def clamp_cmd(msg: CmdMsg) -> CmdMsg:
+    """Clamp ``CMD`` fields to firmware-allowed ranges before TX."""
     return CmdMsg(
         thruster_pct=max(-100, min(100, msg.thruster_pct)),
         rudder_deg=max(-45, min(45, msg.rudder_deg)),

@@ -1,68 +1,74 @@
-"""Global configuration constants for Albacore Jetson stack."""
+"""Central tuning and wiring constants for the Jetson software stack.
+
+Edit here instead of scattering magic numbers across modules. Serial device
+names are Linux defaults (``ttyACM*``); reassign after ``ls /dev/ttyACM*`` on
+the robot. Network IPs are for documentation and laptop scripts; the Jetson
+listener binds ``UDP_LISTEN_HOST``.
+"""
 
 from __future__ import annotations
 
-# Serial configuration
+# --- Serial: Control Teensy (low rate CMD + telemetry) vs Audio Teensy (high rate AUD) ---
 CONTROL_SERIAL_PORT = "/dev/ttyACM0"
 AUDIO_SERIAL_PORT = "/dev/ttyACM1"
 CONTROL_BAUD = 115200
 AUDIO_BAUD = 2_000_000
 SERIAL_TIMEOUT_S = 0.01
 
-# Network configuration
+# --- UDP: laptop commands and dashboard relay (see main.py for client port +1) ---
 UDP_LISTEN_HOST = "0.0.0.0"
 UDP_LISTEN_PORT = 5005
 JETSON_IP = "192.168.1.50"
 LAPTOP_IP = "192.168.1.10"
 UDP_RECV_BUFFER = 4096
 
-# Control loop and watchdog
+# --- Main loop: should match laptop/controller 20 Hz CMD heartbeat; watchdog matches Teensy firmware ---
 MAIN_LOOP_HZ = 20.0
 MAIN_LOOP_DT = 1.0 / MAIN_LOOP_HZ
 WATCHDOG_TIMEOUT_S = 0.5
 
-# Camera / vision
+# --- Vision: COCO pretrained YOLOv8n; thresholds for NMS/display ---
 CAMERA_INDEX = 0
 YOLO_MODEL_NAME = "yolov8n.pt"
 VISION_CONF_THRESHOLD = 0.25
 VISION_IOU_THRESHOLD = 0.45
 
-# Audio configuration
+# --- Audio: Teensy nominal Fs; classifier resamples to 16 kHz internally ---
 AUDIO_SAMPLE_RATE_HZ = 20_000
 AUDIO_CLASSIFIER_SAMPLE_RATE_HZ = 16_000
 AUDIO_CHUNK_SECONDS = 0.25
 AUDIO_CHUNK_SAMPLES = int(AUDIO_SAMPLE_RATE_HZ * AUDIO_CHUNK_SECONDS)
 AUDIO_BINARY_MODE = False
 
-# Hydrophone array geometry (meters): front-left, front-right, rear-left, rear-right
-ARRAY_GEOMETRY = [
-    (-0.075, 0.075, 0.0),
-    (0.075, 0.075, 0.0),
-    (-0.075, -0.075, 0.0),
-    (0.075, -0.075, 0.0),
-]
-SOUND_SPEED_MPS = 1480.0
+# # --- TDOA: 15 cm square hydrophone layout (x forward, y starboard); z unused in 2D bearing ---
+# ARRAY_GEOMETRY = [
+#     (-0.075, 0.075, 0.0),
+#     (0.075, 0.075, 0.0),
+#     (-0.075, -0.075, 0.0),
+#     (0.075, -0.075, 0.0),
+# ]
+# SOUND_SPEED_MPS = 1480.0
 
-# Navigation gains and defaults
-WAYPOINT_KP = 1.5
-WAYPOINT_KI = 0.0
-WAYPOINT_KD = 0.2
-WAYPOINT_CRUISE_THRUSTER = 45
-WAYPOINT_STOP_RADIUS_M = 2.0
+# --- Navigation: waypoint PID, target-follow P gains, depth-hold placeholder ---
+# WAYPOINT_KP = 1.5
+# WAYPOINT_KI = 0.0
+# WAYPOINT_KD = 0.2
+# WAYPOINT_CRUISE_THRUSTER = 45
+# WAYPOINT_STOP_RADIUS_M = 2.0
 
-TARGET_FOLLOW_RUDDER_KP = 60.0
-TARGET_FOLLOW_THRUSTER_KP = 60.0
-TARGET_DESIRED_AREA_RATIO = 0.08
-TARGET_LOST_FRAMES_HOLD = 8
-TARGET_LOST_FRAMES_STOP = 20
-TARGET_HOLD_THRUSTER = 20
+# TARGET_FOLLOW_RUDDER_KP = 60.0
+# TARGET_FOLLOW_THRUSTER_KP = 60.0
+# TARGET_DESIRED_AREA_RATIO = 0.08
+# TARGET_LOST_FRAMES_HOLD = 8
+# TARGET_LOST_FRAMES_STOP = 20
+# TARGET_HOLD_THRUSTER = 20
 
-DEPTH_KP = 3.0
-DEPTH_KI = 0.0
-DEPTH_KD = 0.2
-DEPTH_DEADBAND_M = 0.10
+# DEPTH_KP = 3.0
+# DEPTH_KI = 0.0
+# DEPTH_KD = 0.2
+# DEPTH_DEADBAND_M = 0.10
 
-# Actuator limits
+# --- Actuator command limits (must match protocol.clamp_cmd and firmware) ---
 THRUSTER_MIN = -100
 THRUSTER_MAX = 100
 RUDDER_MIN_DEG = -45
@@ -70,12 +76,12 @@ RUDDER_MAX_DEG = 45
 ELEVATOR_MIN_DEG = -45
 ELEVATOR_MAX_DEG = 45
 
-# Ballast command values
+# Ballast: signed integer in CMD field (-1 / 0 / 1)
 BALLAST_ASCEND = -1
 BALLAST_STOP = 0
 BALLAST_DESCEND = 1
 
-# Mock data defaults
+# --- MockComms defaults (optional; mock module may use inline values too) ---
 MOCK_BATTERY_START_V = 12.6
 MOCK_BATTERY_END_V = 11.0
 MOCK_BATTERY_DRAIN_V_PER_S = 0.001
