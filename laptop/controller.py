@@ -1,4 +1,20 @@
-"""Laptop-side manual controller using pygame and UDP."""
+"""Poolside manual control: pygame input → UDP to Jetson.
+
+Sends ``CMD,...`` at 20 Hz (keeps the Teensy watchdog fed). Listens on
+``port + 1`` (default 5006) for telemetry and ``STATE`` lines relayed from the
+Jetson—same protocol as ``jetson/comms/protocol.py``.
+
+Run (from repo root, venv active)::
+
+    python laptop/controller.py --jetson-ip <JETSON_IP> --port 5005
+
+If ``jetson/main.py --mock`` runs on the **same machine** as this script, use
+``--jetson-ip 127.0.0.1`` (the default ``192.168.1.50`` will not reach the local
+mock and telemetry will stay empty).
+
+Requires a small pygame window to stay focused for keyboard events. Gamepad
+wins over keyboard when detected.
+"""
 
 from __future__ import annotations
 
@@ -17,6 +33,8 @@ MODES = ["MANUAL", "AUTO_WAYPOINT", "AUTO_TRACK"]
 
 @dataclass(slots=True)
 class CmdState:
+    """Current stick/command snapshot; ``mode`` is cycled with M (Jetson decides behavior)."""
+
     thruster_pct: int = 0
     rudder_deg: int = 0
     elevator_deg: int = 0
@@ -42,6 +60,7 @@ def format_cmd(state: CmdState) -> str:
 
 
 def read_gamepad_command(joy: Optional[pygame.joystick.Joystick]) -> Optional[tuple[int, int, int]]:
+    """Map axes 0/1 to rudder/thruster; triggers (axes 4/5) to ballast if present."""
     if joy is None:
         return None
     lx = joy.get_axis(0)
@@ -60,6 +79,7 @@ def read_gamepad_command(joy: Optional[pygame.joystick.Joystick]) -> Optional[tu
 
 
 def update_keyboard(state: CmdState, dt: float) -> None:
+    """W/S ramp thrust, A/D rudder, Q/E ballast; release keys coast thrust/rudder toward 0."""
     keys = pygame.key.get_pressed()
     ramp = int(100 * dt * 2.0)
     decay = int(100 * dt * 1.5)
@@ -93,6 +113,7 @@ def update_keyboard(state: CmdState, dt: float) -> None:
 
 
 def render_status(state: CmdState, telemetry: list[str], using_gamepad: bool, target: str) -> None:
+    """Redraw terminal (ANSI clear + home) so the HUD does not scroll."""
     print("\x1b[2J\x1b[H", end="")
     print("ALBACORE CONTROLLER")
     print(f"Target: {target}")
@@ -103,7 +124,7 @@ def render_status(state: CmdState, telemetry: list[str], using_gamepad: bool, ta
         f"elev={state.elevator_deg:>3} bal={state.ballast_dir:>2}"
     )
     print("-" * 72)
-    for line in telemetry[-8:]:
+    for line in telemetry[-5:]:
         print(line)
     print("-" * 72)
     print("Keys: W/S thrust, A/D rudder, Q/E ballast, M mode, Space ESTOP, Esc quit")
@@ -111,12 +132,14 @@ def render_status(state: CmdState, telemetry: list[str], using_gamepad: bool, ta
 
 
 def run_controller(jetson_ip: str, port: int) -> None:
+    """Bind UDP ``port+1``, send commands to ``(jetson_ip, port)``, poll pygame at 60 FPS."""
     pygame.init()
     pygame.joystick.init()
     pygame.display.set_mode((400, 200))
     pygame.display.set_caption("Albacore Controller")
     clock = pygame.time.Clock()
 
+    # Initialize gamepad if present
     joy: Optional[pygame.joystick.Joystick] = None
     if pygame.joystick.get_count() > 0:
         joy = pygame.joystick.Joystick(0)
@@ -184,7 +207,11 @@ def run_controller(jetson_ip: str, port: int) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Albacore laptop UDP controller.")
-    parser.add_argument("--jetson-ip", default="192.168.1.50")
+    parser.add_argument(
+        "--jetson-ip",
+        default="192.168.1.50",
+        help="Jetson UDP address. Use 127.0.0.1 when jetson/main.py --mock runs on this machine.",
+    )
     parser.add_argument("--port", type=int, default=5005)
     args = parser.parse_args()
 
