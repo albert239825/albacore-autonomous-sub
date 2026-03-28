@@ -40,6 +40,14 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+Jetson users should install with `requirements-jetson.txt` instead of `requirements.txt`:
+
+```bash
+pip install -r requirements-jetson.txt
+```
+
+Reason: Jetson needs NVIDIA/JetPack-matched `torch` wheels from the Jetson index, while keeping `requirements.txt` Torch-free avoids broken installs on non-Jetson machines.
+
 2. Start Jetson stack in mock mode:
 
 ```bash
