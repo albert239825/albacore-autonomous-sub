@@ -8,11 +8,9 @@ listener binds ``UDP_LISTEN_HOST``.
 
 from __future__ import annotations
 
-# --- Serial: Control Teensy (low rate CMD + telemetry) vs Audio Teensy (high rate AUD) ---
+# --- Serial: single Teensy (CMD + all telemetry including AUD on one USB link) ---
 CONTROL_SERIAL_PORT = "/dev/ttyACM0"
-AUDIO_SERIAL_PORT = "/dev/ttyACM1"
-CONTROL_BAUD = 115200
-AUDIO_BAUD = 2_000_000
+CONTROL_BAUD = 1_000_000
 SERIAL_TIMEOUT_S = 0.01
 
 # --- UDP: laptop commands and dashboard relay (see main.py for client port +1) ---
@@ -33,8 +31,8 @@ YOLO_MODEL_NAME = "yolov8n.pt"
 VISION_CONF_THRESHOLD = 0.25
 VISION_IOU_THRESHOLD = 0.45
 
-# --- Audio: Teensy nominal Fs; classifier resamples to 16 kHz internally ---
-AUDIO_SAMPLE_RATE_HZ = 20_000
+# --- Audio: nominal hydrophone sample rate from single Teensy (timer ISR); classifier resamples to 16 kHz ---
+AUDIO_SAMPLE_RATE_HZ = 5_000
 AUDIO_CLASSIFIER_SAMPLE_RATE_HZ = 16_000
 AUDIO_CHUNK_SECONDS = 0.25
 AUDIO_CHUNK_SAMPLES = int(AUDIO_SAMPLE_RATE_HZ * AUDIO_CHUNK_SECONDS)
@@ -71,6 +69,8 @@ AUDIO_BINARY_MODE = False
 # --- Actuator command limits (must match protocol.clamp_cmd and firmware) ---
 THRUSTER_MIN = -100
 THRUSTER_MAX = 100
+BOW_MIN = -100
+BOW_MAX = 100
 RUDDER_MIN_DEG = -45
 RUDDER_MAX_DEG = 45
 ELEVATOR_MIN_DEG = -45

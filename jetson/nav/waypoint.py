@@ -51,7 +51,7 @@ class WaypointNavigator:
     ) -> CmdMsg:
         dist_m = _haversine_m(current_lat, current_lon, target_lat, target_lon)
         if dist_m <= WAYPOINT_STOP_RADIUS_M:
-            return CmdMsg(0, 0, 0, 0)
+            return CmdMsg(0, 0, 0, 0, 0)
 
         desired_heading = _bearing_deg(current_lat, current_lon, target_lat, target_lon)
         err = _wrap_deg(desired_heading - current_heading_deg)
@@ -60,7 +60,7 @@ class WaypointNavigator:
         self.prev_error = err
 
         rudder = int(max(-45, min(45, self.kp * err + self.ki * self.integral + self.kd * deriv)))
-        return CmdMsg(WAYPOINT_CRUISE_THRUSTER, rudder, 0, 0)
+        return CmdMsg(WAYPOINT_CRUISE_THRUSTER, 0, rudder, 0, 0)
 
 
 if __name__ == "__main__":

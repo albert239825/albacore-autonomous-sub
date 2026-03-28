@@ -4,7 +4,7 @@ Hackathon scaffold for an untethered UUV software stack with:
 
 - laptop manual control over UDP/WiFi
 - Jetson orchestration and autonomy modes
-- Teensy control firmware and Teensy audio firmware
+- single Teensy 4.1 firmware scaffold (control + sensing on one MCU)
 - mock hardware interfaces for laptop-only development
 
 ## Repo Layout
@@ -12,7 +12,6 @@ Hackathon scaffold for an untethered UUV software stack with:
 ```text
 firmware/
   control_teensy/control_teensy.ino
-  audio_teensy/audio_teensy.ino
 jetson/
   config.py
   main.py
@@ -56,19 +55,13 @@ python controller.py --jetson-ip 127.0.0.1 --port 5005
 
 ## Protocol Summary
 
-- UDP laptop->Jetson:
-  - `CMD,thruster,rudder,elevator,ballast`
+- UDP laptop→Jetson:
+  - `CMD,thruster_pct,bow_pct,rudder_deg,elevator_deg,ballast_dir`
   - `MODE,MANUAL|AUTO_WAYPOINT|AUTO_TRACK`
   - `ESTOP`
-- Serial Jetson->Control Teensy:
-  - `CMD,thruster,rudder,elevator,ballast`
-- Serial Control Teensy->Jetson:
-  - `IMU,ax,ay,az,gx,gy,gz`
-  - `USS,top,left,right,front`
-  - `BAT,voltage`
-  - `DEP,depth`
-- Serial Audio Teensy->Jetson:
-  - `AUD,ch0,ch1,ch2,ch3`
+- Serial Jetson↔Teensy (single USB link):
+  - Out: `CMD,thruster_pct,bow_pct,rudder_deg,elevator_deg,ballast_dir`
+  - In: `IMU,...` `USS,...` `BAT,...` `DEP,...` `AUD,...`
 
 ## Module Smoke Tests
 

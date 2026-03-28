@@ -1,17 +1,16 @@
-"""Jetson orchestrator: UDP from laptop, two USB serial links, optional vision.
+"""Jetson orchestrator: UDP from laptop, single Teensy serial link, optional vision.
 
-Runs a fixed-rate loop (~``MAIN_LOOP_HZ``) that (1) drains control Teensy
-telemetry and forwards it to the laptop dashboard, (2) pulls audio chunks for
-TDOA bearing, (3) applies laptop ``CMD`` / ``MODE`` / ``ESTOP``, (4) selects
-``CMD`` from manual input, waypoint nav, or target-follow, and (5) sends the
-result to the control Teensy. Use ``--mock`` to swap real serial for
+Runs a fixed-rate loop (~``MAIN_LOOP_HZ``) that (1) drains Teensy telemetry and
+forwards it to the laptop dashboard, (2) applies laptop ``CMD`` / ``MODE`` /
+``ESTOP``, (3) selects ``CMD`` from manual input (COMMS-only mode) or future
+nav modules, and (4) sends the result to the Teensy. Use ``--mock`` for
 ``MockComms`` (no hardware).
 
 Dashboard UDP: laptop sends to ``UDP_LISTEN_PORT``; first packet sets relay
 address to ``(client_ip, UDP_LISTEN_PORT + 1)`` so telemetry and ``STATE`` lines
 match ``laptop/controller.py`` binding on port 5006.
 
-**Temporary:** COMMS-ONLY TEST MODE — audio, vision, nav, and auto modes are
+**Temporary:** COMMS-ONLY TEST MODE — audio TDOA, vision, nav, and auto modes are
 commented out below. Uncomment marked blocks when ready.
 """
 
@@ -33,16 +32,7 @@ from typing import Optional
 from comms.mock_comms import MockComms
 from comms.protocol import CmdMsg, EStopMsg, ModeMsg, ParsedMessage, StateMsg, clamp_cmd, serialize
 from comms.serial_comms import SerialComms
-from config import (
-    # AUDIO_BAUD,
-    # AUDIO_SERIAL_PORT,
-    CONTROL_BAUD,
-    CONTROL_SERIAL_PORT,
-    MAIN_LOOP_DT,
-    MAIN_LOOP_HZ,
-    UDP_LISTEN_HOST,
-    UDP_LISTEN_PORT,
-)
+from config import CONTROL_BAUD, CONTROL_SERIAL_PORT, MAIN_LOOP_DT, MAIN_LOOP_HZ, UDP_LISTEN_HOST, UDP_LISTEN_PORT
 
 # from nav.target_follow import TargetFollowController
 # from nav.waypoint import WaypointNavigator
@@ -62,7 +52,7 @@ class Mode(str, Enum):
 class ControlState:
     """Shared state between the main loop and worker threads (vision updates detection)."""
     mode: Mode = Mode.MANUAL
-    manual_cmd: CmdMsg = field(default_factory=lambda: CmdMsg(0, 0, 0, 0))
+    manual_cmd: CmdMsg = field(default_factory=lambda: CmdMsg(0, 0, 0, 0, 0))
     estop: bool = False
     # latest_detection: Optional[Detection] = None
     latest_bearing_deg: float = 0.0
@@ -70,24 +60,15 @@ class ControlState:
     latest_det_conf: float = 0.0
 
 
-def make_links(use_mock: bool):
-    """Return control (and optionally audio) Teensy links — ``MockComms`` or ``SerialComms``."""
+def make_link(use_mock: bool) -> SerialComms | MockComms:
+    """Return a single ``SerialComms`` or ``MockComms`` instance."""
     if use_mock:
-        control = MockComms("control")
-        # audio = MockComms("audio")
-        control.connect()
-        # audio.connect()
-        # return control, audio
-        return control, None
-    control = SerialComms(CONTROL_SERIAL_PORT, CONTROL_BAUD)
-    # audio = SerialComms(AUDIO_SERIAL_PORT, AUDIO_BAUD)
-    control.connect()
-    # audio.connect()
-    # return control, audio
-    return control, None
-
-
-# --- COMMS TEST: audio second link disabled above; restore `audio` + dual return when enabling audio stack.
+        link: SerialComms | MockComms = MockComms()
+        link.connect()
+        return link
+    ser = SerialComms(CONTROL_SERIAL_PORT, CONTROL_BAUD)
+    ser.connect()
+    return ser
 
 
 def udp_reader_thread(
@@ -139,8 +120,8 @@ def serial_reader_thread(link, q: "queue.Queue[ParsedMessage]", stop: threading.
 
 
 def main(use_mock: bool) -> None:
-    control_link, audio_link = make_links(use_mock)
-    # audio_reader = AudioStreamReader(audio_link)  # type: ignore[arg-type]
+    control_link = make_link(use_mock)
+    # audio_reader = AudioStreamReader(control_link)  # type: ignore[arg-type]
     # audio_reader.start()
 
     # UDP: commands on LISTEN_PORT; telemetry/state sent to laptop on LISTEN_PORT+1
@@ -235,7 +216,7 @@ def main(use_mock: bool) -> None:
             # 4–6) Mode-dependent command (ESTOP overrides)
             # COMMS TEST: always forward laptop CMD except ESTOP (auto branches below when enabled).
             if state.estop:
-                out_cmd = CmdMsg(0, 0, 0, -1)
+                out_cmd = CmdMsg(0, 0, 0, 0, -1)
                 state.mode = Mode.MANUAL
                 state.estop = False
             else:
@@ -281,8 +262,6 @@ def main(use_mock: bool) -> None:
         #     vision_t.join(timeout=1.0)
         # audio_reader.stop()
         control_link.close()
-        if audio_link is not None:
-            audio_link.close()
         udp_sock.close()
 
 

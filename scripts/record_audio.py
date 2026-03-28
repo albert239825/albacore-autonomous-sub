@@ -11,7 +11,7 @@ import scipy.io.wavfile
 from jetson.audio.stream import AudioStreamReader
 from jetson.comms.mock_comms import MockComms
 from jetson.comms.serial_comms import SerialComms
-from jetson.config import AUDIO_BAUD, AUDIO_SERIAL_PORT, AUDIO_SAMPLE_RATE_HZ
+from jetson.config import AUDIO_SAMPLE_RATE_HZ, CONTROL_BAUD, CONTROL_SERIAL_PORT
 
 
 def main() -> None:
@@ -22,10 +22,10 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.mock:
-        link = MockComms("audio")
+        link = MockComms()
         link.connect()
     else:
-        link = SerialComms(AUDIO_SERIAL_PORT, AUDIO_BAUD)
+        link = SerialComms(CONTROL_SERIAL_PORT, CONTROL_BAUD)
         link.connect()
 
     reader = AudioStreamReader(link)  # type: ignore[arg-type]

@@ -83,7 +83,7 @@ class AudioStreamReader:
 if __name__ == "__main__":
     from comms.mock_comms import MockComms
 
-    mock = MockComms("audio")
+    mock = MockComms()
     mock.connect()
 
     class _Adapter:

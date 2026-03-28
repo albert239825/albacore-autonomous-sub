@@ -36,6 +36,7 @@ class CmdState:
     """Current stick/command snapshot; ``mode`` is cycled with M (Jetson decides behavior)."""
 
     thruster_pct: int = 0
+    bow_pct: int = 0
     rudder_deg: int = 0
     elevator_deg: int = 0
     ballast_dir: int = 0
@@ -56,30 +57,35 @@ def next_mode(idx: int) -> int:
 
 
 def format_cmd(state: CmdState) -> str:
-    return f"CMD,{state.thruster_pct},{state.rudder_deg},{state.elevator_deg},{state.ballast_dir}\n"
+    return (
+        f"CMD,{state.thruster_pct},{state.bow_pct},{state.rudder_deg},"
+        f"{state.elevator_deg},{state.ballast_dir}\n"
+    )
 
 
-def read_gamepad_command(joy: Optional[pygame.joystick.Joystick]) -> Optional[tuple[int, int, int]]:
-    """Map axes 0/1 to rudder/thruster; triggers (axes 4/5) to ballast if present."""
+def read_gamepad_command(joy: Optional[pygame.joystick.Joystick]) -> Optional[tuple[int, int, int, int]]:
+    """Axes 0/1: rudder + thruster; axis 2: bow; axes 4/5: ballast triggers if present."""
     if joy is None:
         return None
     lx = joy.get_axis(0)
     ly = joy.get_axis(1)
+    rx = joy.get_axis(2) if joy.get_numaxes() > 2 else 0.0
     lt = joy.get_axis(4) if joy.get_numaxes() > 4 else 1.0
     rt = joy.get_axis(5) if joy.get_numaxes() > 5 else 1.0
 
     thruster = clamp_int(-ly * 100.0, -100, 100)
+    bow = clamp_int(rx * 100.0, -100, 100)
     rudder = clamp_int(lx * 45.0, -45, 45)
     ballast_dir = 0
     if rt < 0.2:
         ballast_dir = 1
     elif lt < 0.2:
         ballast_dir = -1
-    return thruster, rudder, ballast_dir
+    return thruster, bow, rudder, ballast_dir
 
 
 def update_keyboard(state: CmdState, dt: float) -> None:
-    """W/S ramp thrust, A/D rudder, Q/E ballast; release keys coast thrust/rudder toward 0."""
+    """W/S thrust, J/L bow, A/D rudder, Q/E ballast; release coasts thrust/bow/rudder toward 0."""
     keys = pygame.key.get_pressed()
     ramp = int(100 * dt * 2.0)
     decay = int(100 * dt * 1.5)
@@ -94,6 +100,16 @@ def update_keyboard(state: CmdState, dt: float) -> None:
             state.thruster_pct = max(0, state.thruster_pct - decay)
         elif state.thruster_pct < 0:
             state.thruster_pct = min(0, state.thruster_pct + decay)
+
+    if keys[pygame.K_j]:
+        state.bow_pct = clamp_int(state.bow_pct - ramp, -100, 100)
+    elif keys[pygame.K_l]:
+        state.bow_pct = clamp_int(state.bow_pct + ramp, -100, 100)
+    else:
+        if state.bow_pct > 0:
+            state.bow_pct = max(0, state.bow_pct - decay)
+        elif state.bow_pct < 0:
+            state.bow_pct = min(0, state.bow_pct + decay)
 
     if keys[pygame.K_a]:
         state.rudder_deg = clamp_int(state.rudder_deg - rudder_rate, -45, 45)
@@ -120,14 +136,14 @@ def render_status(state: CmdState, telemetry: list[str], using_gamepad: bool, ta
     print(f"Input: {'gamepad' if using_gamepad else 'keyboard'}")
     print(f"Mode: {state.mode}")
     print(
-        f"CMD: thr={state.thruster_pct:>4} rud={state.rudder_deg:>3} "
+        f"CMD: thr={state.thruster_pct:>4} bow={state.bow_pct:>4} rud={state.rudder_deg:>3} "
         f"elev={state.elevator_deg:>3} bal={state.ballast_dir:>2}"
     )
     print("-" * 72)
     for line in telemetry[-5:]:
         print(line)
     print("-" * 72)
-    print("Keys: W/S thrust, A/D rudder, Q/E ballast, M mode, Space ESTOP, Esc quit")
+    print("Keys: W/S thrust, J/L bow, A/D rudder, Q/E ballast, M mode, Space ESTOP, Esc quit")
     sys.stdout.flush()
 
 
@@ -173,7 +189,7 @@ def run_controller(jetson_ip: str, port: int) -> None:
         gamepad_cmd = read_gamepad_command(joy)
         using_gamepad = gamepad_cmd is not None
         if gamepad_cmd is not None:
-            state.thruster_pct, state.rudder_deg, state.ballast_dir = gamepad_cmd
+            state.thruster_pct, state.bow_pct, state.rudder_deg, state.ballast_dir = gamepad_cmd
             state.elevator_deg = 0
         else:
             update_keyboard(state, dt)
@@ -184,6 +200,7 @@ def run_controller(jetson_ip: str, port: int) -> None:
             if state.estop:
                 sock.sendto(b"ESTOP\n", target)
                 state.thruster_pct = 0
+                state.bow_pct = 0
                 state.rudder_deg = 0
                 state.ballast_dir = -1
                 state.estop = False

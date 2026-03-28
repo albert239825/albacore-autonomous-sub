@@ -1,4 +1,4 @@
-"""Quick serial debug utility for control or audio Teensy."""
+"""Quick serial debug utility for the single Teensy link."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from jetson.comms.serial_comms import SerialComms
 def main() -> None:
     parser = argparse.ArgumentParser(description="Simple serial debug utility.")
     parser.add_argument("--port", default="/dev/ttyACM0")
-    parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument("--baud", type=int, default=1_000_000)
     parser.add_argument("--seconds", type=float, default=10.0)
     args = parser.parse_args()
 
@@ -22,7 +22,7 @@ def main() -> None:
     end = time.time() + args.seconds
     try:
         while time.time() < end:
-            link.send_cmd(CmdMsg(0, 0, 0, 0))
+            link.send_cmd(CmdMsg(0, 0, 0, 0, 0))
             msg = link.read_message()
             if msg is not None:
                 print(msg)

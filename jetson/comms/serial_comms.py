@@ -1,17 +1,15 @@
-"""Blocking line I/O over USB serial to a Teensy.
+"""Blocking line I/O over USB serial to the Teensy.
 
 Uses pyserial with a short read timeout so ``readline`` / ``read_message`` do not
 block indefinitely—call from a dedicated reader thread and drain often. One
-``SerialComms`` instance per port (control vs audio).
+``SerialComms`` instance for the single Teensy link (CMD out; IMU/USS/BAT/DEP/AUD in).
 """
 
 from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Optional
-
-import serial
+from typing import Any, Optional
 
 from .protocol import CmdMsg, ParsedMessage, parse_line, serialize
 
@@ -34,12 +32,14 @@ class SerialComms:
         self.port = port
         self.baud = baud
         self.timeout_s = timeout_s
-        self.ser: Optional[serial.Serial] = None
+        self.ser: Any = None
         self.stats = SerialStats()
 
     def connect(self) -> None:
         """Open the port and flush OS buffers."""
-        self.ser = serial.Serial(self.port, self.baud, timeout=self.timeout_s)
+        import serial as serial_mod
+
+        self.ser = serial_mod.Serial(self.port, self.baud, timeout=self.timeout_s)
         self.ser.reset_input_buffer()
         self.ser.reset_output_buffer()
 
@@ -97,7 +97,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Simple serial comms smoke test.")
     parser.add_argument("--port", default="/dev/ttyACM0")
-    parser.add_argument("--baud", type=int, default=115200)
+    parser.add_argument("--baud", type=int, default=1_000_000)
     parser.add_argument("--seconds", type=float, default=3.0)
     args = parser.parse_args()
 
@@ -107,7 +107,7 @@ if __name__ == "__main__":
         print(f"Connected: {args.port} @ {args.baud}")
         end = time.time() + args.seconds
         while time.time() < end:
-            link.send_cmd(CmdMsg(0, 0, 0, 0))
+            link.send_cmd(CmdMsg(0, 0, 0, 0, 0))
             msg = link.read_message()
             if msg is not None:
                 print(msg)

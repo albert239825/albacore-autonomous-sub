@@ -1,10 +1,9 @@
-"""Fake Teensy links for development without USB hardware.
+"""Fake single-Teensy serial link for development without USB hardware.
 
-``MockComms`` mirrors ``SerialComms`` method names: ``connect``, ``send_cmd``,
-``read_message``, ``close``. Use ``role="control"`` for IMU/USS/BAT/DEP at
-``telemetry_hz``, or ``role="audio"`` for continuous ``AUD`` lines. Synthetic
-audio uses per-channel phase offsets to exercise TDOA; optional broadband
-jitter mimics propeller-like noise.
+``MockComms`` mirrors ``SerialComms`` methods. Produces interleaved telemetry
+(``IMU``, ``USS``, ``BAT``, ``DEP`` at ``telemetry_hz``) and ``AUD`` lines at
+``audio_config.sample_rate_hz`` on the same virtual stream, matching one USB
+serial connection to the Jetson.
 """
 
 from __future__ import annotations
@@ -18,12 +17,15 @@ from typing import Deque, Optional
 
 from .protocol import AudMsg, BatMsg, CmdMsg, DepMsg, ImuMsg, ParsedMessage, UssMsg, parse_line, serialize
 
+# Keep in sync with ``config.AUDIO_SAMPLE_RATE_HZ`` (single Teensy hydrophone ISR rate).
+_DEFAULT_AUDIO_FS_HZ = 5_000
+
 
 @dataclass(slots=True)
 class MockAudioConfig:
     """Tunable fake hydrophone stream (12-bit centered ~2048)."""
 
-    sample_rate_hz: int = 20_000
+    sample_rate_hz: int = _DEFAULT_AUDIO_FS_HZ
     tone_hz: float = 500.0
     amplitude: float = 1700.0
     offsets: tuple[int, int, int, int] = (0, 2, 4, 6)
@@ -33,17 +35,16 @@ class MockAudioConfig:
 class MockComms:
     """Duck-typed replacement for ``SerialComms`` (same main methods)."""
 
-    def __init__(self, role: str, telemetry_hz: float = 20.0, audio_config: Optional[MockAudioConfig] = None) -> None:
-        self.role = role
+    def __init__(self, telemetry_hz: float = 20.0, audio_config: Optional[MockAudioConfig] = None) -> None:
         self.telemetry_hz = telemetry_hz
         self.audio_config = audio_config or MockAudioConfig()
         self.connected = False
-        self._line_buffer: Deque[str] = deque(maxlen=5000)
+        self._line_buffer: Deque[str] = deque(maxlen=50000)
         self._start = time.time()
         self._last_telemetry = 0.0
         self._last_audio = 0.0
         self._battery_v = 12.6
-        self._cmd = CmdMsg(0, 0, 0, 0)
+        self._cmd = CmdMsg(0, 0, 0, 0, 0)
         self._sample_idx = 0
 
     def connect(self) -> None:
@@ -120,17 +121,15 @@ class MockComms:
             self._line_buffer.append(serialize(AudMsg(ch_vals[0], ch_vals[1], ch_vals[2], ch_vals[3])))
 
     def _pump(self) -> None:
-        """Fill internal queue according to ``role`` before reads."""
+        """Fill queue with telemetry bursts and continuous AUD lines."""
         if not self.connected:
             return
         now = time.time()
-        if self.role == "control":
-            period = 1.0 / self.telemetry_hz
-            if (now - self._last_telemetry) >= period:
-                self._last_telemetry = now
-                self._enqueue_control_telemetry()
-        elif self.role == "audio":
-            self._enqueue_audio_samples()
+        period = 1.0 / self.telemetry_hz
+        if (now - self._last_telemetry) >= period:
+            self._last_telemetry = now
+            self._enqueue_control_telemetry()
+        self._enqueue_audio_samples()
 
     def read_raw_line(self) -> Optional[str]:
         self._pump()
@@ -146,17 +145,12 @@ class MockComms:
 
 
 if __name__ == "__main__":
-    control = MockComms("control", telemetry_hz=20.0)
-    audio = MockComms("audio", audio_config=MockAudioConfig(propeller_noise_mode=True))
-    control.connect()
-    audio.connect()
-    control.send_cmd(CmdMsg(30, -5, 0, 1))
+    link = MockComms(telemetry_hz=20.0, audio_config=MockAudioConfig(propeller_noise_mode=True))
+    link.connect()
+    link.send_cmd(CmdMsg(30, -12, -5, 0, 1))
     start = time.time()
     while time.time() - start < 1.5:
-        msg_c = control.read_message()
-        if msg_c is not None:
-            print("CONTROL:", msg_c)
-        msg_a = audio.read_message()
-        if msg_a is not None and isinstance(msg_a, AudMsg):
-            print("AUDIO:", msg_a)
-        time.sleep(0.01)
+        msg = link.read_message()
+        if msg is not None:
+            print(msg)
+        time.sleep(0.005)
