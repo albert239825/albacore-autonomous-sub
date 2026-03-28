@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from typing import Iterable
 
 import numpy as np
 
-from config import CAMERA_INDEX, VISION_CONF_THRESHOLD, VISION_IOU_THRESHOLD, YOLO_MODEL_NAME
+from config import CAMERA_INDEX, VISION_CONF_THRESHOLD, VISION_IOU_THRESHOLD, VISION_TARGET_CLASSES, YOLO_MODEL_NAME
 
 
 @dataclass(slots=True)
@@ -31,15 +32,15 @@ class Detector:
         """
         Load YOLOv8n. On Jetson with CUDA available, ultralytics auto-selects GPU.
 
-        target_classes: if provided, only return detections matching these COCO class
-        names. Example: ["bottle", "cup", "sports ball"]. If None, return all detections.
+        target_classes: classes we consider "follow targets" for visualization and
+        downstream filtering defaults. If omitted, uses config.VISION_TARGET_CLASSES.
         """
         from ultralytics import YOLO
 
         self.model = YOLO(model_name)
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
-        self.target_classes: set[str] | None = set(target_classes) if target_classes else None
+        self.target_classes: set[str] = set(target_classes) if target_classes is not None else set(VISION_TARGET_CLASSES)
 
     def detect(self, frame: np.ndarray) -> list[Detection]:
         """Run inference on a single BGR frame (OpenCV format)."""
@@ -59,8 +60,6 @@ class Detector:
             conf = float(box.conf.item())
             cls_id = int(box.cls.item())
             class_name = str(names[cls_id])
-            if self.target_classes is not None and class_name not in self.target_classes:
-                continue
             x1, y1, x2, y2 = box.xyxy[0].tolist()
             w = float(x2 - x1)
             h = float(y2 - y1)
@@ -71,16 +70,26 @@ class Detector:
         out.sort(key=lambda d: d.confidence, reverse=True)
         return out
 
-    def draw(self, frame: np.ndarray, detections: list[Detection]) -> np.ndarray:
-        """Draw bounding boxes, class labels, and confidence on a copy of the frame."""
+    def draw(
+        self,
+        frame: np.ndarray,
+        detections: list[Detection],
+        target_classes: Iterable[str] | None = None,
+    ) -> np.ndarray:
+        """Draw detections on a copy of frame.
+
+        Target-class boxes are red; non-target boxes are green.
+        """
         import cv2
 
         annotated = frame.copy()
         font = cv2.FONT_HERSHEY_SIMPLEX
         scale = 0.5
         thickness = 1
-        color = (0, 255, 0)
+        target_set = set(target_classes) if target_classes is not None else self.target_classes
         for det in detections:
+            is_target = (not target_set) or (det.class_name in target_set)
+            color = (0, 0, 255) if is_target else (0, 255, 0)
             half_w, half_h = det.w / 2.0, det.h / 2.0
             x1 = int(round(det.x - half_w))
             y1 = int(round(det.y - half_h))

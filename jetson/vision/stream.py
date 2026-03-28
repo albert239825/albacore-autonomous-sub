@@ -17,6 +17,7 @@ from config import (
     MJPEG_PORT,
     VISION_CONF_THRESHOLD,
     VISION_IOU_THRESHOLD,
+    VISION_TARGET_CLASSES,
     YOLO_MODEL_NAME,
 )
 from vision.detector import Detection, Detector
@@ -31,6 +32,7 @@ class VisionStream:
         frame_height: int = FRAME_HEIGHT,
         jpeg_quality: int = MJPEG_JPEG_QUALITY,
         mjpeg_port: int = MJPEG_PORT,
+        target_classes: list[str] | None = None,
     ) -> None:
         self.cap = cv2.VideoCapture(camera_index)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, frame_width)
@@ -50,6 +52,7 @@ class VisionStream:
         self._http_server: HTTPServer | None = None
         self._ema_alpha = 2.0 / (30 + 1)  # EWMA ~30 frames
         self._prev_frame_time: float | None = None
+        self._target_classes = set(target_classes) if target_classes is not None else set(VISION_TARGET_CLASSES)
 
     def start(self) -> None:
         """Start capture+detection thread and MJPEG server thread (idempotent)."""
@@ -69,7 +72,7 @@ class VisionStream:
                 time.sleep(0.1)
                 continue
             detections = self.detector.detect(frame)
-            annotated = self.detector.draw(frame, detections)
+            annotated = self.detector.draw(frame, detections, target_classes=self._target_classes)
             now = time.perf_counter()
             if self._prev_frame_time is not None:
                 dt = max(now - self._prev_frame_time, 1e-9)

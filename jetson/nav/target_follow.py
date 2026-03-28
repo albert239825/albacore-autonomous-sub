@@ -1,111 +1,113 @@
-"""Target-follow controller from bbox geometry to CMD outputs."""
+"""Stateless target-follow control law (`TrackState` -> `CmdMsg`).
+
+This module contains only control logic; it does not read sensors, run vision, or
+manage state across frames. Call `compute()` once per control tick with the latest
+tracker output.
+
+For live camera integration testing of this control law (without sending hardware
+commands), use `python -m vision.integration_test --with-target-follow`.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional, Protocol
-
 from comms.protocol import CmdMsg
 from config import (
-    TARGET_DESIRED_AREA_RATIO,
     TARGET_FOLLOW_BOW_KP,
-    TARGET_FOLLOW_LOW_THRUSTER_THRESHOLD,
+    TARGET_FOLLOW_BOW_SPEED_THRESHOLD,
+    TARGET_FOLLOW_DESIRED_AREA_RATIO,
+    TARGET_FOLLOW_HOLD_THRUSTER,
+    TARGET_FOLLOW_LOST_HOLD_FRAMES,
+    TARGET_FOLLOW_LOST_STOP_FRAMES,
     TARGET_FOLLOW_RUDDER_KP,
     TARGET_FOLLOW_THRUSTER_KP,
-    TARGET_HOLD_THRUSTER,
-    TARGET_LOST_FRAMES_HOLD,
-    TARGET_LOST_FRAMES_STOP,
 )
+from vision.tracker import TrackState
 
 
-class BboxObservation(Protocol):
-    """Duck type: matches ``vision.detector.Detection`` without importing OpenCV stack."""
-
-    class_name: str
-    confidence: float
-    x: float
-    y: float
-    w: float
-    h: float
+def _clamp_i(v: int, lo: int, hi: int) -> int:
+    """Clamp integer command values to actuator-safe limits."""
+    return max(lo, min(hi, v))
 
 
-def _clamp(v: float, lo: int, hi: int) -> int:
-    return int(max(lo, min(hi, round(v))))
+def compute(track: TrackState, frame_w: int, frame_h: int) -> CmdMsg:
+    """Convert a tracking estimate into propulsion and steering commands.
 
+    Behavior summary:
+    - No track: return full stop.
+    - Recently lost: coast forward at hold thrust, straight heading.
+    - Tracked target: use bbox area for range (thruster) and horizontal pixel error
+      for yaw (bow thruster at low speed, rudder at higher speed).
 
-@dataclass(slots=True)
-class TargetFollowController:
-    frame_width: int
-    frame_height: int
-    desired_area_ratio: float = TARGET_DESIRED_AREA_RATIO
-    lost_frames: int = 0
-    last_rudder: int = 0
-    last_bow: int = 0
-    last_thruster: int = 0
+    TODO: add ballast direction command for vertical control
+    """
+    if not track.is_tracking:
+        return CmdMsg(0, 0, 0, 0, 0)
 
-    def update(self, detection: Optional[BboxObservation]) -> CmdMsg:
-        if detection is None:
-            self.lost_frames += 1
-            if self.lost_frames <= TARGET_LOST_FRAMES_HOLD:
-                if self.last_thruster < TARGET_FOLLOW_LOW_THRUSTER_THRESHOLD:
-                    return CmdMsg(TARGET_HOLD_THRUSTER, self.last_bow, 0, 0, 0)
-                return CmdMsg(TARGET_HOLD_THRUSTER, 0, self.last_rudder, 0, 0)
-            if self.lost_frames <= TARGET_LOST_FRAMES_STOP:
-                if self.last_thruster < TARGET_FOLLOW_LOW_THRUSTER_THRESHOLD:
-                    return CmdMsg(10, self.last_bow, 0, 0, 0)
-                return CmdMsg(10, 0, self.last_rudder, 0, 0)
-            return CmdMsg(0, 0, 0, 0, 0)
+    if track.frames_lost > 0:
+        if track.frames_lost <= TARGET_FOLLOW_LOST_HOLD_FRAMES:
+            return CmdMsg(TARGET_FOLLOW_HOLD_THRUSTER, 0, 0, 0, 0)
+        thr = TARGET_FOLLOW_HOLD_THRUSTER - (track.frames_lost - TARGET_FOLLOW_LOST_HOLD_FRAMES) * 3
+        return CmdMsg(max(0, thr), 0, 0, 0, 0)
 
-        self.lost_frames = 0
-        x, y, w, h = detection.x, detection.y, detection.w, detection.h
-        _ = y
-        x_error = (x - (self.frame_width / 2.0)) / max(1.0, self.frame_width)
-        area = max(1.0, w * h)
-        desired_area = self.desired_area_ratio * (self.frame_width * self.frame_height)
-        size_error = (desired_area - area) / max(1.0, desired_area)
+    error_x = (track.x - frame_w / 2.0) / frame_w
+    frame_area = float(frame_w * frame_h)
+    target_area = max(1e-9, track.w * track.h)
+    area_ratio = target_area / frame_area
+    size_error = area_ratio - TARGET_FOLLOW_DESIRED_AREA_RATIO
+    thruster_pct = _clamp_i(int(-size_error * TARGET_FOLLOW_THRUSTER_KP), -100, 100)
 
-        thruster = _clamp(TARGET_FOLLOW_THRUSTER_KP * size_error, -100, 100)
-        self.last_thruster = thruster
+    if abs(thruster_pct) <= TARGET_FOLLOW_BOW_SPEED_THRESHOLD:
+        bow_pct = _clamp_i(int(error_x * TARGET_FOLLOW_BOW_KP), -100, 100)
+        rudder_deg = 0
+    else:
+        rudder_deg = _clamp_i(int(error_x * TARGET_FOLLOW_RUDDER_KP), -45, 45)
+        bow_pct = 0
 
-        if thruster < TARGET_FOLLOW_LOW_THRUSTER_THRESHOLD:
-            bow = _clamp(TARGET_FOLLOW_BOW_KP * x_error, -100, 100)
-            rudder = 0
-            self.last_bow = bow
-            self.last_rudder = 0
-        else:
-            bow = 0
-            rudder = _clamp(TARGET_FOLLOW_RUDDER_KP * x_error, -45, 45)
-            self.last_bow = 0
-            self.last_rudder = rudder
-
-        return CmdMsg(thruster, bow, rudder, 0, 0)
-
-
-@dataclass(slots=True)
-class _SimDet:
-    """For ``__main__`` demo only (same fields as ``vision.detector.Detection``)."""
-
-    class_name: str
-    confidence: float
-    x: float
-    y: float
-    w: float
-    h: float
+    return CmdMsg(thruster_pct, bow_pct, rudder_deg, 0, 0)
 
 
 if __name__ == "__main__":
-    controller = TargetFollowController(frame_width=640, frame_height=480)
-    dets: list[Optional[_SimDet]] = [
-        _SimDet("boat", 0.9, 100, 220, 40, 40),
-        _SimDet("boat", 0.9, 220, 220, 50, 50),
-        _SimDet("boat", 0.9, 320, 240, 65, 65),
-        _SimDet("boat", 0.9, 480, 240, 80, 80),
-        None,
-        None,
-        None,
-        None,
-        None,
+    fw, fh = 640, 480
+    fa = float(fw * fh)
+
+    def area_to_wh(ratio: float) -> tuple[float, float]:
+        """Square box with given area / frame_area."""
+        side = (ratio * fa) ** 0.5
+        return side, side
+
+    def tr(
+        x: float,
+        y: float,
+        area_ratio: float,
+        *,
+        frames_lost: int = 0,
+        is_tracking: bool = True,
+    ) -> TrackState:
+        w, h = area_to_wh(area_ratio)
+        return TrackState(
+            x=x,
+            y=y,
+            w=w,
+            h=h,
+            confidence=0.9,
+            class_name="bottle",
+            frames_visible=5,
+            frames_lost=frames_lost,
+            is_tracking=is_tracking,
+        )
+
+    scenarios: list[tuple[str, TrackState]] = [
+        ("Target centered (320, 240), area 5%", tr(320.0, 240.0, 0.05)),
+        ("Target left (100, 240), area 5%", tr(100.0, 240.0, 0.05)),
+        ("Target right (540, 240), area 5%", tr(540.0, 240.0, 0.05)),
+        ("Target close (320, 240), area 15%", tr(320.0, 240.0, 0.15)),
+        ("Target far (320, 240), area 1%", tr(320.0, 240.0, 0.01)),
+        ("Target lost (5 frames)", tr(320.0, 240.0, (80.0 * 60.0) / fa, frames_lost=5)),
+        ("Target lost (15 frames)", tr(320.0, 240.0, (80.0 * 60.0) / fa, frames_lost=15)),
+        ("Target lost (25 frames)", tr(320.0, 240.0, (80.0 * 60.0) / fa, frames_lost=25)),
+        ("No target", TrackState()),
     ]
-    for idx, det in enumerate(dets):
-        cmd = controller.update(det)
-        print(f"frame={idx:02d} detection={det is not None} cmd={cmd}")
+
+    for title, tr in scenarios:
+        cmd = compute(tr, fw, fh)
+        print(f"{title:34} → CMD: thr={cmd.thruster_pct}, bow={cmd.bow_pct}, rud={cmd.rudder_deg}")
