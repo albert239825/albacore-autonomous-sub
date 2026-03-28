@@ -21,9 +21,12 @@ from config import (
 class BboxObservation(Protocol):
     """Duck type: matches ``vision.detector.Detection`` without importing OpenCV stack."""
 
-    cls_name: str
+    class_name: str
     confidence: float
-    xywh: tuple[float, float, float, float]
+    x: float
+    y: float
+    w: float
+    h: float
 
 
 def _clamp(v: float, lo: int, hi: int) -> int:
@@ -54,7 +57,7 @@ class TargetFollowController:
             return CmdMsg(0, 0, 0, 0, 0)
 
         self.lost_frames = 0
-        x, y, w, h = detection.xywh
+        x, y, w, h = detection.x, detection.y, detection.w, detection.h
         _ = y
         x_error = (x - (self.frame_width / 2.0)) / max(1.0, self.frame_width)
         area = max(1.0, w * h)
@@ -82,18 +85,21 @@ class TargetFollowController:
 class _SimDet:
     """For ``__main__`` demo only (same fields as ``vision.detector.Detection``)."""
 
-    cls_name: str
+    class_name: str
     confidence: float
-    xywh: tuple[float, float, float, float]
+    x: float
+    y: float
+    w: float
+    h: float
 
 
 if __name__ == "__main__":
     controller = TargetFollowController(frame_width=640, frame_height=480)
     dets: list[Optional[_SimDet]] = [
-        _SimDet("boat", 0.9, (100, 220, 40, 40)),
-        _SimDet("boat", 0.9, (220, 220, 50, 50)),
-        _SimDet("boat", 0.9, (320, 240, 65, 65)),
-        _SimDet("boat", 0.9, (480, 240, 80, 80)),
+        _SimDet("boat", 0.9, 100, 220, 40, 40),
+        _SimDet("boat", 0.9, 220, 220, 50, 50),
+        _SimDet("boat", 0.9, 320, 240, 65, 65),
+        _SimDet("boat", 0.9, 480, 240, 80, 80),
         None,
         None,
         None,

@@ -29,14 +29,18 @@ class DetectionTracker:
         a = self.alpha
         return tuple(a * c + (1.0 - a) * p for p, c in zip(prev, cur))  # type: ignore[return-value]
 
+    def _det_xywh(self, d: Detection) -> tuple[float, float, float, float]:
+        return (d.x, d.y, d.w, d.h)
+
     def update(self, detections: list[Detection]) -> Optional[TrackState]:
         if detections:
             best = max(detections, key=lambda d: d.confidence)
+            cur = self._det_xywh(best)
             if self.state.age_frames == 0:
-                self.state.xywh = best.xywh
+                self.state.xywh = cur
             else:
-                self.state.xywh = self._smooth_xywh(self.state.xywh, best.xywh)
-            self.state.cls_name = best.cls_name
+                self.state.xywh = self._smooth_xywh(self.state.xywh, cur)
+            self.state.cls_name = best.class_name
             self.state.confidence = best.confidence
             self.state.age_frames += 1
             self.state.missing_frames = 0
@@ -52,12 +56,12 @@ class DetectionTracker:
 if __name__ == "__main__":
     tracker = DetectionTracker(alpha=0.3, max_missing_frames=4)
     sequence: list[list[Detection]] = [
-        [Detection("boat", 0.9, (100, 100, 80, 50))],
-        [Detection("boat", 0.88, (108, 102, 82, 52))],
-        [Detection("boat", 0.86, (120, 106, 85, 54))],
+        [Detection(class_name="boat", confidence=0.9, x=100.0, y=100.0, w=80.0, h=50.0)],
+        [Detection(class_name="boat", confidence=0.88, x=108.0, y=102.0, w=82.0, h=52.0)],
+        [Detection(class_name="boat", confidence=0.86, x=120.0, y=106.0, w=85.0, h=54.0)],
         [],
         [],
-        [Detection("boat", 0.8, (140, 111, 88, 55))],
+        [Detection(class_name="boat", confidence=0.8, x=140.0, y=111.0, w=88.0, h=55.0)],
     ]
     for i, frame_dets in enumerate(sequence):
         state = tracker.update(frame_dets)
