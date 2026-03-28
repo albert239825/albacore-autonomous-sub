@@ -11,7 +11,7 @@ Hackathon scaffold for an untethered UUV software stack with:
 
 ```text
 firmware/
-  control_teensy/control_teensy.ino
+  teensy/teensy.ino
 jetson/
   config.py
   main.py
