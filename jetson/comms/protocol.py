@@ -2,8 +2,7 @@
 
 Wire format: ``MSG_TYPE,field1,field2,...\\n`` (newline-terminated). Used for:
 
-- Jetson ↔ Control Teensy serial (``CMD`` out; ``IMU``, ``USS``, ``BAT``, ``DEP`` in).
-- Audio Teensy → Jetson (``AUD``).
+- Jetson ↔ Teensy serial (``CMD`` out; ``IMU``, ``USS``, ``BAT``, ``DEP``, ``AUD`` in).
 - Laptop ↔ Jetson UDP (``CMD``, ``MODE``, ``ESTOP`` in; relayed telemetry + ``STATE`` out).
 
 ``clamp_cmd`` enforces actuator limits before sending ``CMD`` to firmware.
@@ -17,9 +16,10 @@ from typing import Optional, Union
 
 @dataclass(slots=True)
 class CmdMsg:
-    """Actuator command: thruster %, fin angles (deg), ballast (-1 ascend, 0 stop, 1 descend)."""
+    """Actuator command: main thruster %, bow thruster %, fin angles (deg), ballast dir."""
 
     thruster_pct: int
+    bow_pct: int
     rudder_deg: int
     elevator_deg: int
     ballast_dir: int
@@ -101,7 +101,10 @@ ParsedMessage = Union[CmdMsg, ImuMsg, UssMsg, BatMsg, DepMsg, AudMsg, ModeMsg, E
 def serialize(msg: ParsedMessage) -> str:
     """Return a single ASCII line including trailing newline."""
     if isinstance(msg, CmdMsg):
-        return f"CMD,{msg.thruster_pct},{msg.rudder_deg},{msg.elevator_deg},{msg.ballast_dir}\n"
+        return (
+            f"CMD,{msg.thruster_pct},{msg.bow_pct},{msg.rudder_deg},"
+            f"{msg.elevator_deg},{msg.ballast_dir}\n"
+        )
     if isinstance(msg, ImuMsg):
         return f"IMU,{msg.ax:.4f},{msg.ay:.4f},{msg.az:.4f},{msg.gx:.4f},{msg.gy:.4f},{msg.gz:.4f}\n"
     if isinstance(msg, UssMsg):
@@ -129,8 +132,14 @@ def parse_line(line: str) -> Optional[ParsedMessage]:
     fields = line.split(",")
     msg_type = fields[0]
     try:
-        if msg_type == "CMD" and len(fields) == 5:
-            return CmdMsg(int(fields[1]), int(fields[2]), int(fields[3]), int(fields[4]))
+        if msg_type == "CMD" and len(fields) == 6:
+            return CmdMsg(
+                int(fields[1]),
+                int(fields[2]),
+                int(fields[3]),
+                int(fields[4]),
+                int(fields[5]),
+            )
         if msg_type == "IMU" and len(fields) == 7:
             return ImuMsg(*(float(v) for v in fields[1:7]))
         if msg_type == "USS" and len(fields) == 5:
@@ -156,6 +165,7 @@ def clamp_cmd(msg: CmdMsg) -> CmdMsg:
     """Clamp ``CMD`` fields to firmware-allowed ranges before TX."""
     return CmdMsg(
         thruster_pct=max(-100, min(100, msg.thruster_pct)),
+        bow_pct=max(-100, min(100, msg.bow_pct)),
         rudder_deg=max(-45, min(45, msg.rudder_deg)),
         elevator_deg=max(-45, min(45, msg.elevator_deg)),
         ballast_dir=max(-1, min(1, msg.ballast_dir)),
@@ -164,7 +174,7 @@ def clamp_cmd(msg: CmdMsg) -> CmdMsg:
 
 if __name__ == "__main__":
     raw_lines = [
-        "CMD,35,-10,0,1\n",
+        "CMD,35,10,-10,0,1\n",
         "IMU,0.1,-0.2,9.8,0.4,0.2,-0.1\n",
         "USS,120,80,75,200\n",
         "BAT,12.34\n",
