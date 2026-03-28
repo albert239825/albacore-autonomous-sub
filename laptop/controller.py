@@ -29,6 +29,7 @@ import pygame
 
 
 MODES = ["MANUAL", "AUTO_WAYPOINT", "AUTO_TRACK"]
+HUD_TELEMETRY_ORDER = ("IMU", "USS", "BAT", "DEP", "STATE")
 
 
 @dataclass(slots=True)
@@ -127,8 +128,9 @@ def update_keyboard(state: CmdState, dt: float) -> None:
     elif keys[pygame.K_e]:
         state.ballast_dir = 1
 
-
-def render_status(state: CmdState, telemetry: list[str], using_gamepad: bool, target: str) -> None:
+def render_status(
+    state: CmdState, latest_telemetry: dict[str, str], using_gamepad: bool, target: str
+) -> None:
     """Redraw terminal (ANSI clear + home) so the HUD does not scroll."""
     print("\x1b[2J\x1b[H", end="")
     print("ALBACORE CONTROLLER")
@@ -140,8 +142,10 @@ def render_status(state: CmdState, telemetry: list[str], using_gamepad: bool, ta
         f"elev={state.elevator_deg:>3} bal={state.ballast_dir:>2}"
     )
     print("-" * 72)
-    for line in telemetry[-5:]:
-        print(line)
+    for msg_type in HUD_TELEMETRY_ORDER:
+        line = latest_telemetry.get(msg_type)
+        if line is not None:
+            print(line)
     print("-" * 72)
     print("Keys: W/S thrust, J/L bow, A/D rudder, Q/E ballast, M mode, Space ESTOP, Esc quit")
     sys.stdout.flush()
@@ -167,7 +171,7 @@ def run_controller(jetson_ip: str, port: int) -> None:
     sock.bind(("0.0.0.0", listen_port))
     target = (jetson_ip, port)
     state = CmdState()
-    telemetry: list[str] = []
+    latest_telemetry: dict[str, str] = {}
     send_period = 1.0 / 20.0
     last_send = 0.0
     running = True
@@ -208,15 +212,21 @@ def run_controller(jetson_ip: str, port: int) -> None:
                 sock.sendto(format_cmd(state).encode("ascii"), target)
             last_send = now
 
-        for _ in range(16):
+        # Unified single-stream mode can include high-rate AUD packets. Drain enough
+        # UDP packets each frame and keep only control/status lines for HUD display.
+        for _ in range(512):
             try:
                 raw, _addr = sock.recvfrom(4096)
             except BlockingIOError:
                 break
-            telemetry.append(raw.decode("ascii", errors="ignore").strip())
-            telemetry = telemetry[-100:]
+            line = raw.decode("ascii", errors="ignore").strip()
+            if line.startswith("AUD,"):
+                continue
+            msg_type = line.split(",", 1)[0]
+            if msg_type in HUD_TELEMETRY_ORDER:
+                latest_telemetry[msg_type] = line
 
-        render_status(state, telemetry, using_gamepad, f"{jetson_ip}:{port}")
+        render_status(state, latest_telemetry, using_gamepad, f"{jetson_ip}:{port}")
 
     sock.close()
     pygame.quit()

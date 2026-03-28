@@ -30,7 +30,7 @@ from typing import Optional
 # from audio.stream import AudioStreamReader
 # from audio.tdoa import estimate_bearing
 from comms.mock_comms import MockComms
-from comms.protocol import CmdMsg, EStopMsg, ModeMsg, ParsedMessage, StateMsg, clamp_cmd, serialize
+from comms.protocol import AudMsg, CmdMsg, EStopMsg, ModeMsg, ParsedMessage, StateMsg, clamp_cmd, serialize
 from comms.serial_comms import SerialComms
 from config import CONTROL_BAUD, CONTROL_SERIAL_PORT, MAIN_LOOP_DT, MAIN_LOOP_HZ, UDP_LISTEN_HOST, UDP_LISTEN_PORT
 
@@ -46,6 +46,10 @@ class Mode(str, Enum):
     MANUAL = "MANUAL"
     AUTO_WAYPOINT = "AUTO_WAYPOINT"
     AUTO_TRACK = "AUTO_TRACK"
+
+
+MAX_CTRL_MSGS_PER_LOOP = 256
+MAX_AUD_QUEUE = 4096
 
 
 @dataclass(slots=True)
@@ -89,12 +93,37 @@ def udp_reader_thread(
             q.put((msg, _addr))
 
 
-def serial_reader_thread(link, q: "queue.Queue[ParsedMessage]", stop: threading.Event) -> None:
-    """Continuously read from one Teensy link and push parsed messages to a queue."""
+def _put_drop_oldest(q: "queue.Queue[ParsedMessage]", msg: ParsedMessage) -> None:
+    """Non-blocking put; if full, drop oldest item to keep newest data flowing."""
+    try:
+        q.put_nowait(msg)
+        return
+    except queue.Full:
+        pass
+    try:
+        q.get_nowait()
+    except queue.Empty:
+        pass
+    try:
+        q.put_nowait(msg)
+    except queue.Full:
+        pass
+
+
+def serial_reader_thread(
+    link,
+    ctrl_q: "queue.Queue[ParsedMessage]",
+    aud_q: "queue.Queue[ParsedMessage]",
+    stop: threading.Event,
+) -> None:
+    """Continuously read one Teensy stream and demux control vs audio messages."""
     while not stop.is_set():
         msg = link.read_message()
         if msg is not None:
-            q.put(msg)
+            if isinstance(msg, AudMsg):
+                _put_drop_oldest(aud_q, msg)
+            else:
+                ctrl_q.put(msg)
         else:
             time.sleep(0.001)
 
@@ -133,6 +162,7 @@ def main(use_mock: bool) -> None:
     stop = threading.Event()
     udp_q: "queue.Queue[tuple[ParsedMessage, tuple[str, int]]]" = queue.Queue()
     ctrl_q: "queue.Queue[ParsedMessage]" = queue.Queue()
+    aud_q: "queue.Queue[ParsedMessage]" = queue.Queue(maxsize=MAX_AUD_QUEUE)
     # vision_q: "queue.Queue[Optional[Detection]]" = queue.Queue(maxsize=2)
     state = ControlState()
 
@@ -141,7 +171,7 @@ def main(use_mock: bool) -> None:
 
     threads = [
         threading.Thread(target=udp_reader_thread, args=(udp_sock, udp_q, stop), daemon=True),
-        threading.Thread(target=serial_reader_thread, args=(control_link, ctrl_q, stop), daemon=True),
+        threading.Thread(target=serial_reader_thread, args=(control_link, ctrl_q, aud_q, stop), daemon=True),
     ]
     for t in threads:
         t.start()
@@ -160,7 +190,7 @@ def main(use_mock: bool) -> None:
             loop_start = time.time()
 
             # 1) Drain control Teensy telemetry; forward to dashboard
-            while True:
+            for _ in range(MAX_CTRL_MSGS_PER_LOOP):
                 try:
                     msg = ctrl_q.get_nowait()
                 except queue.Empty:
