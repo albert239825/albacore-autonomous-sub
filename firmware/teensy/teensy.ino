@@ -15,6 +15,12 @@
 #include <cstring>
 #include <cstdio>
 
+// Set via PlatformIO: `-DSERIAL_DEBUG=1` or env `teensy41_debug`. When enabled, emits rare `DBG,...`
+// lines for bring-up (Jetson parser ignores unknown types until extended).
+#ifndef SERIAL_DEBUG
+#define SERIAL_DEBUG 0
+#endif
+
 // ── PIN ASSIGNMENTS (confirm with EE) ─────────────────────────────────────
 constexpr uint8_t MAIN_THRUSTER_PIN = 2;
 constexpr uint8_t BOW_THRUSTER_PIN = 3;
@@ -260,6 +266,19 @@ void parseCmdLine(const char *line) {
   watchdogActive = false;
   lastCmdMillis = millis();
   applyActuatorsFromCommands();
+#if SERIAL_DEBUG
+  Serial.print(F("DBG,CMD_ACK,"));
+  Serial.print(cmdThrusterPct);
+  Serial.print(',');
+  Serial.print(cmdBowPct);
+  Serial.print(',');
+  Serial.print(cmdRudderDeg);
+  Serial.print(',');
+  Serial.print(cmdElevatorDeg);
+  Serial.print(',');
+  Serial.print(cmdBallastDir);
+  Serial.print('\n');
+#endif
 }
 
 void pumpSerialRx() {
@@ -437,6 +456,9 @@ void loop() {
   if (firstCmdReceived && !watchdogActive && (now - lastCmdMillis) > WATCHDOG_TIMEOUT_MS) {
     applyWatchdogFailsafe();
     watchdogActive = true;
+#if SERIAL_DEBUG
+    Serial.println(F("DBG,WD"));
+#endif
   }
 
   drainUltrasonic(Serial1, &ussTopCm);

@@ -35,3 +35,6 @@ htmlcov/
 *.pt
 runs/
 .wandb/
+
+# PlatformIO
+.pio

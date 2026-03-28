@@ -23,6 +23,7 @@ laptop/
   controller.py
 scripts/
   test_serial.py
+  teensy_serial_smoke.py
   record_audio.py
   viz_sensors.py
 sim/
@@ -81,6 +82,21 @@ python -m vision.detector
 python -m audio.classifier
 python main.py --mock
 ```
+
+## Teensy USB bring-up (hardware)
+
+1. **PlatformIO** (repo root): build/upload `teensy41` — see [`platformio.ini`](platformio.ini). Source: [`firmware/teensy/teensy.ino`](firmware/teensy/teensy.ino).
+2. **Serial port**: macOS `export TEENSY_SERIAL_PORT=/dev/cu.usbmodem…` (use `cu.`, not `tty.`). On Jetson, set `CONTROL_SERIAL_PORT` in [`jetson/config.py`](jetson/config.py) to the device Teensy uses.
+3. **Smoke test** (repo root, venv, close PlatformIO monitor first):
+
+   ```bash
+   export TEENSY_SERIAL_PORT=/dev/cu.usbmodemXXXXXXXX
+   python scripts/teensy_serial_smoke.py --seconds 5
+   python scripts/teensy_serial_smoke.py --watchdog-test
+   ```
+
+   Defaults `AUD` off in the console; add `--show-aud` only if you need it. Optional firmware debug lines: build env `teensy41_debug` (prints `DBG,CMD_ACK,...` and `DBG,WD` when watchdog fires).
+4. **Full stack** on one machine: Teensy USB on that host → set `CONTROL_SERIAL_PORT` to that port → `cd jetson && python main.py` (no `--mock`) → `cd laptop && python controller.py --jetson-ip 127.0.0.1`.
 
 ## Notes
 
