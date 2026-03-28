@@ -30,9 +30,9 @@ constexpr uint8_t BOW_THRUSTER_PIN = 3;
 constexpr uint8_t RUDDER_SERVO_PIN = 4;
 constexpr uint8_t RUDDER_SERVO_2_PIN = 5;
 constexpr uint8_t ELEVATOR_SERVO_PIN = 6;
-constexpr uint8_t ELEVATOR_SERVO_2_PIN = 8;
-constexpr uint8_t BALLAST_IN1 = 9;
-constexpr uint8_t BALLAST_IN2 = 10;
+constexpr uint8_t ELEVATOR_SERVO_2_PIN = 7;
+// constexpr uint8_t BALLAST_IN1 = 9;
+// constexpr uint8_t BALLAST_IN2 = 10;
 
 // Hydrophones (conflict-free defaults; A1/A4 avoided — see spec)
 constexpr uint8_t PIEZO_PIN_0 = A0;
