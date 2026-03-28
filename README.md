@@ -59,7 +59,7 @@ python controller.py --jetson-ip 127.0.0.1 --port 5005
   - `CMD,thruster_pct,bow_pct,rudder_deg,elevator_deg,ballast_dir`
   - `MODE,MANUAL|AUTO_WAYPOINT|AUTO_TRACK`
   - `ESTOP`
-- Serial Jetson↔Teensy (single USB link):
+- Serial Jetson↔Teensy (single USB link; baud set in `jetson/config.py` `CONTROL_BAUD`; USB is full-speed):
   - Out: `CMD,thruster_pct,bow_pct,rudder_deg,elevator_deg,ballast_dir`
   - In: `IMU,...` `USS,...` `BAT,...` `DEP,...` `AUD,...`
 

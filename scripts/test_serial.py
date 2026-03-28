@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import time
 
+from jetson.config import CONTROL_BAUD
 from jetson.comms.protocol import CmdMsg
 from jetson.comms.serial_comms import SerialComms
 
@@ -12,7 +13,7 @@ from jetson.comms.serial_comms import SerialComms
 def main() -> None:
     parser = argparse.ArgumentParser(description="Simple serial debug utility.")
     parser.add_argument("--port", default="/dev/ttyACM0")
-    parser.add_argument("--baud", type=int, default=1_000_000)
+    parser.add_argument("--baud", type=int, default=CONTROL_BAUD)
     parser.add_argument("--seconds", type=float, default=10.0)
     args = parser.parse_args()
 

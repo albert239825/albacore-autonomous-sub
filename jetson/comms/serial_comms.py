@@ -95,9 +95,14 @@ class SerialComms:
 if __name__ == "__main__":
     import argparse
 
+    try:
+        from jetson.config import CONTROL_BAUD
+    except ImportError:
+        from config import CONTROL_BAUD  # type: ignore[no-redef]
+
     parser = argparse.ArgumentParser(description="Simple serial comms smoke test.")
     parser.add_argument("--port", default="/dev/ttyACM0")
-    parser.add_argument("--baud", type=int, default=1_000_000)
+    parser.add_argument("--baud", type=int, default=CONTROL_BAUD)
     parser.add_argument("--seconds", type=float, default=3.0)
     args = parser.parse_args()
 
