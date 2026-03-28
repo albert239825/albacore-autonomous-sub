@@ -1,0 +1,9 @@
+# install for jetson, get specific versions for torch and torch vision
+# compatible with jetson hardware
+-r requirements.txt
+
+# Jetson Orin Nano / JetPack 6.2.x / CUDA 12.6 / Python 3.10
+--extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+
+torch==2.8.0
+torchvision==0.23.0
