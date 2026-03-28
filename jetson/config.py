@@ -8,9 +8,9 @@ listener binds ``UDP_LISTEN_HOST``.
 
 from __future__ import annotations
 
-# --- Serial: single Teensy (CMD + all telemetry including AUD on one USB link) ---
-# Linux (Jetson): typically /dev/ttyACM0. macOS: use /dev/cu.usbmodem* (see `ls /dev/cu.usbmodem*`).
-CONTROL_SERIAL_PORT = "/dev/ttyACM0"
+# --- Serial: single Teensy over Jetson hardware UART (CMD + all telemetry including AUD) ---
+# Jetson Orin Nano header UART: /dev/ttyTHS1 (pins 8/10). USB debug uses /dev/ttyACM* or /dev/cu.usbmodem*.
+CONTROL_SERIAL_PORT = "/dev/ttyTHS1"
 CONTROL_BAUD = 1_000_000
 SERIAL_TIMEOUT_S = 0.01
 

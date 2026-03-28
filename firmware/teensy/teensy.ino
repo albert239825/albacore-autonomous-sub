@@ -2,7 +2,7 @@
  * Albacore — single Teensy 4.1 control + sensing firmware.
  * Protocol matches jetson/comms/protocol.py (ASCII lines, newline-terminated).
  *
- * Build: Teensy 4.1, Arduino framework, USB Serial.
+ * Build: Teensy 4.1, Arduino framework, hardware UART to Jetson.
  * Libraries: Servo, Wire, IntervalTimer, SparkFun_LSM6DSV16X, MS5837 (BlueRobotics).
  */
 
@@ -20,6 +20,9 @@
 #ifndef SERIAL_DEBUG
 #define SERIAL_DEBUG 0
 #endif
+
+// Jetson command/telemetry transport UART (set once here if EE remaps ports).
+#define JETSON_SERIAL Serial7
 
 // ── PIN ASSIGNMENTS (confirm with EE) ─────────────────────────────────────
 constexpr uint8_t MAIN_THRUSTER_PIN = 2;
@@ -43,7 +46,7 @@ constexpr bool USE_PAIRED_RUDDER = false;
 constexpr bool USE_PAIRED_ELEVATOR = false;
 
 // Timing
-// Must match jetson/config.py CONTROL_BAUD (Teensy USB serial ignores baud; set for host tools).
+// Must match jetson/config.py CONTROL_BAUD exactly; this is real UART timing now.
 constexpr unsigned long SERIAL_BAUD = 1000000;
 constexpr unsigned long TELEMETRY_PERIOD_MS = 50;
 constexpr unsigned long WATCHDOG_TIMEOUT_MS = 500;
@@ -282,8 +285,8 @@ void parseCmdLine(const char *line) {
 }
 
 void pumpSerialRx() {
-  while (Serial.available() > 0) {
-    const char c = static_cast<char>(Serial.read());
+  while (JETSON_SERIAL.available() > 0) {
+    const char c = static_cast<char>(JETSON_SERIAL.read());
     if (c == '\n') {
       if (rxLineLen < sizeof(rxLineBuf) - 1) {
         rxLineBuf[rxLineLen] = '\0';
@@ -304,48 +307,48 @@ void sendTelemetryBlock() {
   float ax = 0.0f, ay = 0.0f, az = 0.0f, gx = 0.0f, gy = 0.0f, gz = 0.0f;
   readImuTelemetry(&ax, &ay, &az, &gx, &gy, &gz);
 
-  Serial.print(F("IMU,"));
-  Serial.print(ax, 4);
-  Serial.print(',');
-  Serial.print(ay, 4);
-  Serial.print(',');
-  Serial.print(az, 4);
-  Serial.print(',');
-  Serial.print(gx, 4);
-  Serial.print(',');
-  Serial.print(gy, 4);
-  Serial.print(',');
-  Serial.print(gz, 4);
-  Serial.print('\n');
+  JETSON_SERIAL.print(F("IMU,"));
+  JETSON_SERIAL.print(ax, 4);
+  JETSON_SERIAL.print(',');
+  JETSON_SERIAL.print(ay, 4);
+  JETSON_SERIAL.print(',');
+  JETSON_SERIAL.print(az, 4);
+  JETSON_SERIAL.print(',');
+  JETSON_SERIAL.print(gx, 4);
+  JETSON_SERIAL.print(',');
+  JETSON_SERIAL.print(gy, 4);
+  JETSON_SERIAL.print(',');
+  JETSON_SERIAL.print(gz, 4);
+  JETSON_SERIAL.print('\n');
 
-  Serial.print(F("USS,"));
-  Serial.print(ussTopCm);
-  Serial.print(',');
-  Serial.print(ussLeftCm);
-  Serial.print(',');
-  Serial.print(ussRightCm);
-  Serial.print(',');
-  Serial.print(ussFrontCm);
-  Serial.print('\n');
+  JETSON_SERIAL.print(F("USS,"));
+  JETSON_SERIAL.print(ussTopCm);
+  JETSON_SERIAL.print(',');
+  JETSON_SERIAL.print(ussLeftCm);
+  JETSON_SERIAL.print(',');
+  JETSON_SERIAL.print(ussRightCm);
+  JETSON_SERIAL.print(',');
+  JETSON_SERIAL.print(ussFrontCm);
+  JETSON_SERIAL.print('\n');
 
   const float batV = readBatteryVoltageAvg();
-  Serial.print(F("BAT,"));
-  Serial.print(batV, 3);
-  Serial.print('\n');
+  JETSON_SERIAL.print(F("BAT,"));
+  JETSON_SERIAL.print(batV, 3);
+  JETSON_SERIAL.print('\n');
 
   float depthM = 0.0f;
   if (hasDepthSensor) {
     depthSensor.read();
     depthM = depthSensor.depth();
   }
-  Serial.print(F("DEP,"));
-  Serial.print(depthM, 3);
-  Serial.print('\n');
+  JETSON_SERIAL.print(F("DEP,"));
+  JETSON_SERIAL.print(depthM, 3);
+  JETSON_SERIAL.print('\n');
 }
 
 void flushAudioLines() {
   for (uint16_t n = 0; n < AUD_LINES_PER_LOOP_MAX; ++n) {
-    if (Serial.availableForWrite() < SERIAL_WRITE_HEADROOM) {
+    if (JETSON_SERIAL.availableForWrite() < SERIAL_WRITE_HEADROOM) {
       break;
     }
 
@@ -368,15 +371,15 @@ void flushAudioLines() {
     audioReadIdx = static_cast<uint16_t>((r + 1) % AUDIO_BUFFER_SIZE);
     interrupts();
 
-    Serial.print(F("AUD,"));
-    Serial.print(c0);
-    Serial.print(',');
-    Serial.print(c1);
-    Serial.print(',');
-    Serial.print(c2);
-    Serial.print(',');
-    Serial.print(c3);
-    Serial.print('\n');
+    JETSON_SERIAL.print(F("AUD,"));
+    JETSON_SERIAL.print(c0);
+    JETSON_SERIAL.print(',');
+    JETSON_SERIAL.print(c1);
+    JETSON_SERIAL.print(',');
+    JETSON_SERIAL.print(c2);
+    JETSON_SERIAL.print(',');
+    JETSON_SERIAL.print(c3);
+    JETSON_SERIAL.print('\n');
   }
 }
 
@@ -395,6 +398,7 @@ void audioIsr() {
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
+  JETSON_SERIAL.begin(SERIAL_BAUD);
   analogReadResolution(12);
   pinMode(BATTERY_PIN, INPUT);
 

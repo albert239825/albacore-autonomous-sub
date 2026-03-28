@@ -60,7 +60,7 @@ python controller.py --jetson-ip 127.0.0.1 --port 5005
   - `CMD,thruster_pct,bow_pct,rudder_deg,elevator_deg,ballast_dir`
   - `MODE,MANUAL|AUTO_WAYPOINT|AUTO_TRACK`
   - `ESTOP`
-- Serial Jetson↔Teensy (single USB link; baud set in `jetson/config.py` `CONTROL_BAUD`; USB is full-speed):
+- Serial Jetson↔Teensy (single hardware UART link; baud set in `jetson/config.py` `CONTROL_BAUD`):
   - Out: `CMD,thruster_pct,bow_pct,rudder_deg,elevator_deg,ballast_dir`
   - In: `IMU,...` `USS,...` `BAT,...` `DEP,...` `AUD,...`
 
@@ -83,11 +83,12 @@ python -m audio.classifier
 python main.py --mock
 ```
 
-## Teensy USB bring-up (hardware)
+## Teensy hardware bring-up (UART + optional USB debug)
 
 1. **PlatformIO** (repo root): build/upload `teensy41` — see [`platformio.ini`](platformio.ini). Source: [`firmware/teensy/teensy.ino`](firmware/teensy/teensy.ino).
-2. **Serial port**: macOS `export TEENSY_SERIAL_PORT=/dev/cu.usbmodem…` (use `cu.`, not `tty.`). On Jetson, set `CONTROL_SERIAL_PORT` in [`jetson/config.py`](jetson/config.py) to the device Teensy uses.
-3. **Smoke test** (repo root, venv, close PlatformIO monitor first):
+2. **Jetson↔Teensy UART wiring**: Teensy TX → Jetson RX, Teensy RX → Jetson TX, and shared GND (3.3V logic). Jetson header UART is `/dev/ttyTHS1` (pins 8/10).
+3. **Jetson serial config**: set `CONTROL_SERIAL_PORT` in [`jetson/config.py`](jetson/config.py) to `/dev/ttyTHS1`.
+4. **Optional USB smoke test from laptop/host** (repo root, venv, close PlatformIO monitor first):
 
    ```bash
    export TEENSY_SERIAL_PORT=/dev/cu.usbmodemXXXXXXXX
@@ -95,8 +96,8 @@ python main.py --mock
    python scripts/teensy_serial_smoke.py --watchdog-test
    ```
 
-   Defaults `AUD` off in the console; add `--show-aud` only if you need it. Optional firmware debug lines: build env `teensy41_debug` (prints `DBG,CMD_ACK,...` and `DBG,WD` when watchdog fires).
-4. **Full stack** on one machine: Teensy USB on that host → set `CONTROL_SERIAL_PORT` to that port → `cd jetson && python main.py` (no `--mock`) → `cd laptop && python controller.py --jetson-ip 127.0.0.1`.
+   This smoke script is for direct USB debug (`/dev/cu.usbmodem*` or `/dev/ttyACM*`), not the production Jetson UART path. Defaults `AUD` off in the console; add `--show-aud` only if you need it. Optional firmware debug lines: build env `teensy41_debug` (prints `DBG,CMD_ACK,...` and `DBG,WD` when watchdog fires).
+5. **Full stack on hardware**: wire Teensy UART to Jetson (`/dev/ttyTHS1`) → run `cd jetson && python main.py` (no `--mock`) on Jetson → run `cd laptop && python controller.py --jetson-ip <jetson-ip>` on laptop.
 
 ## Notes
 

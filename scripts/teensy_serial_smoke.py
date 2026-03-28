@@ -10,7 +10,13 @@ Examples::
 
     python scripts/teensy_serial_smoke.py --port /dev/cu.usbmodem192773701 --watchdog-test
 
-Defaults for port/baud come from ``jetson.config`` unless overridden or ``TEENSY_SERIAL_PORT`` is set.
+This script is intended for direct USB debugging (for example ``/dev/cu.usbmodem*``
+on macOS or ``/dev/ttyACM*`` on Linux). The production Jetson path uses hardware
+UART (``/dev/ttyTHS1``) and is exercised via ``jetson/main.py``.
+
+Defaults for port/baud come from ``jetson.config`` unless overridden. Since
+``CONTROL_SERIAL_PORT`` may be a Jetson UART device, pass ``--port`` or set
+``TEENSY_SERIAL_PORT`` when running from a laptop.
 """
 
 from __future__ import annotations
