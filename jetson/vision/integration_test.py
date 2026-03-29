@@ -148,9 +148,8 @@ def run(args: argparse.Namespace) -> None:
             detections = vision.get_detections()
             track = tracker.update(detections)
             fps = vision.get_fps()
-            cmd = (
-                target_follow_compute(track, args.frame_width, args.frame_height) if use_target_follow else None
-            )
+            vw, vh = vision.get_vision_frame_size()
+            cmd = target_follow_compute(track, vw, vh) if use_target_follow else None
             if link is not None and cmd is not None:
                 link.send_cmd(clamp_cmd(cmd))
 

@@ -326,7 +326,8 @@ def main(use_mock: bool) -> None:
             elif state.mode == Mode.MANUAL:
                 out_cmd = state.manual_cmd
             elif state.mode == Mode.AUTO_TRACK:
-                out_cmd = target_follow_compute(state.latest_track, FRAME_WIDTH, FRAME_HEIGHT)
+                vw, vh = vision.get_vision_frame_size()
+                out_cmd = target_follow_compute(state.latest_track, vw, vh)
             else:
                 # AUTO_WAYPOINT not yet implemented; fall back to manual
                 out_cmd = state.manual_cmd

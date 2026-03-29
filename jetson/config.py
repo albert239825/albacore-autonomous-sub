@@ -33,13 +33,25 @@ YOLO_MODEL_NAME = "yolov8n.pt"
 VISION_CONF_THRESHOLD = 0.25
 VISION_IOU_THRESHOLD = 0.45
 # Classes eligible for AUTO_TRACK (used by tracker + stream coloring).
-VISION_TARGET_CLASSES = ["person", "cup"] 
+VISION_TARGET_CLASSES = ["cellphone", "cup"] 
 
 # Vision: MJPEG streaming + capture resolution
 MJPEG_PORT = 8080
 MJPEG_JPEG_QUALITY = 70
 FRAME_WIDTH = 640
 FRAME_HEIGHT = 480
+
+# Horizontal crop (fraction of captured width per side) to drop obscured tube edges.
+# Tune in place; sum of left+right must be < 1.0. Used by vision/stream.py and
+# VISION_FRAME_* for tracker / AUTO_TRACK geometry.
+VISION_CROP_SIDE_LEFT_FRAC = 0.18
+VISION_CROP_SIDE_RIGHT_FRAC = 0.12
+_crop_lr_sum = min(
+    VISION_CROP_SIDE_LEFT_FRAC + VISION_CROP_SIDE_RIGHT_FRAC,
+    0.95,
+)
+VISION_FRAME_WIDTH = max(1, int(FRAME_WIDTH * (1.0 - _crop_lr_sum)))
+VISION_FRAME_HEIGHT = FRAME_HEIGHT
 
 # Tracker (vision.tracker)
 TRACKER_SMOOTHING_ALPHA = 0.4

@@ -4,6 +4,7 @@ import './App.css'
 
 const BACKEND_URL = `${window.location.protocol}//${window.location.host}`
 const WS_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`
+// MJPEG is cropped on the Jetson (see jetson/config.py VISION_CROP_*); no extra crop here.
 const JETSON_MJPEG_URL = 'http://192.168.0.204:8080'
 
 function fmtNum(v, digits = 2) {

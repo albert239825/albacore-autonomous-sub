@@ -1,4 +1,8 @@
-"""Camera + detector hub: threaded capture, MJPEG browser stream."""
+"""Camera + detector hub: threaded capture, MJPEG browser stream.
+
+Frames are cropped horizontally (see ``VISION_CROP_SIDE_*_FRAC`` in config) before
+detection and streaming so the dashboard and YOLO see the same ROI.
+"""
 
 from __future__ import annotations
 
@@ -16,11 +20,25 @@ from config import (
     MJPEG_JPEG_QUALITY,
     MJPEG_PORT,
     VISION_CONF_THRESHOLD,
+    VISION_CROP_SIDE_LEFT_FRAC,
+    VISION_CROP_SIDE_RIGHT_FRAC,
+    VISION_FRAME_HEIGHT,
+    VISION_FRAME_WIDTH,
     VISION_IOU_THRESHOLD,
     VISION_TARGET_CLASSES,
     YOLO_MODEL_NAME,
 )
 from vision.detector import Detection, Detector
+
+
+def crop_horizontal_tube_edges(frame: np.ndarray) -> np.ndarray:
+    """Remove left/right fractions of width; no-op if crop would empty the frame."""
+    h, w = frame.shape[:2]
+    left = int(w * VISION_CROP_SIDE_LEFT_FRAC)
+    right = int(w * VISION_CROP_SIDE_RIGHT_FRAC)
+    if left + right >= w:
+        return frame
+    return frame[:, left : w - right]
 
 
 class VisionStream:
@@ -53,6 +71,13 @@ class VisionStream:
         self._ema_alpha = 2.0 / (30 + 1)  # EWMA ~30 frames
         self._prev_frame_time: float | None = None
         self._target_classes = set(target_classes) if target_classes is not None else set(VISION_TARGET_CLASSES)
+        # Dimensions of the last cropped frame (matches bbox / target_follow).
+        self._crop_w = VISION_FRAME_WIDTH
+        self._crop_h = VISION_FRAME_HEIGHT
+
+    def get_vision_frame_size(self) -> tuple[int, int]:
+        """Width and height of the ROI after horizontal crop (for ``target_follow``)."""
+        return (self._crop_w, self._crop_h)
 
     def start(self) -> None:
         """Start capture+detection thread and MJPEG server thread (idempotent)."""
@@ -71,6 +96,10 @@ class VisionStream:
             if not ok:
                 time.sleep(0.1)
                 continue
+            frame = crop_horizontal_tube_edges(frame)
+            ch, cw = frame.shape[0], frame.shape[1]
+            self._crop_w = cw
+            self._crop_h = ch
             detections = self.detector.detect(frame)
             annotated = self.detector.draw(frame, detections, target_classes=self._target_classes)
             now = time.perf_counter()
