@@ -1,8 +1,10 @@
-# install for jetson, get specific versions for torch and torch vision
-# compatible with jetson hardware
--r requirements.txt
-
 # Jetson Orin Nano / JetPack 6.2.x / CUDA 12.6 / Python 3.10
+# INSTALL THIS FIRST: pip install -r requirements-jetson.txt
+# THEN: pip install -r requirements.txt
+# Do NOT use -r requirements.txt at the top of this file —
+# it can cause pip to resolve torch from PyPI before seeing the Jetson index.
+# Second install should be: pip install --no-deps -r requirements.txt
+
 --index-url https://pypi.jetson-ai-lab.io/jp6/cu126
 --extra-index-url https://pypi.org/simple
 

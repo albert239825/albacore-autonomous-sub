@@ -37,16 +37,25 @@ sim/
 ```bash
 python -m venv .venv
 source .venv/bin/activate
+```
+
+Non-Jetson (desktop/laptop) install:
+
+```bash
 pip install -r requirements.txt
 ```
 
-Jetson users should install with `requirements-jetson.txt` instead of `requirements.txt`:
+Jetson Orin Nano / JetPack 6.2.x / CUDA 12.6 / Python 3.10 install (**order matters**):
 
 ```bash
 pip install -r requirements-jetson.txt
+pip install --no-deps -r requirements.txt
 ```
 
-Reason: Jetson needs NVIDIA/JetPack-matched `torch` wheels from the Jetson index, while keeping `requirements.txt` Torch-free avoids broken installs on non-Jetson machines.
+Why this order is required:
+- `requirements-jetson.txt` pins Jetson-compatible CUDA wheels for `torch` and `torchvision` from the Jetson index.
+- The second step uses `--no-deps` so packages like `ultralytics` do not pull a CPU `torch` wheel from PyPI and overwrite the Jetson wheel.
+- Do not include `-r requirements.txt` inside `requirements-jetson.txt`; that can cause pip to resolve Torch from PyPI too early.
 
 2. Start Jetson stack in mock mode:
 
