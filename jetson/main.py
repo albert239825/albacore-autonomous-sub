@@ -198,20 +198,6 @@ def main(use_mock: bool) -> None:
                 if dashboard_addr is not None:
                     udp_sock.sendto(serialize(msg).encode("ascii"), dashboard_addr)
 
-            # # 2) Short audio window for TDOA (bearing for STATE line)
-            # chunk = audio_reader.get_chunk(1024, timeout_s=0.001)
-            # if chunk is not None:
-            #     try:
-            #         state.latest_bearing_deg = estimate_bearing(
-            #             chunk[0].astype(np.float64),
-            #             chunk[1].astype(np.float64),
-            #             chunk[2].astype(np.float64),
-            #             chunk[3].astype(np.float64),
-            #             sample_rate_hz=20000,
-            #         )
-            #     except Exception:
-            #         pass
-
             # 3) Laptop CMD / MODE / ESTOP; learn dashboard address from sender
             while True:
                 try:

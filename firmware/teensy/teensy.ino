@@ -3,11 +3,10 @@
  * Protocol matches jetson/comms/protocol.py (ASCII lines, newline-terminated).
  *
  * Build: Teensy 4.1, Arduino framework, hardware UART to Jetson.
- * Libraries: Servo, Wire, IntervalTimer, SparkFun_LSM6DSV16X, MS5837 (BlueRobotics).
+ * Libraries: Servo, Wire, SparkFun_LSM6DSV16X, MS5837 (BlueRobotics).
  */
 
 #include <Arduino.h>
-#include <IntervalTimer.h>
 #include <MS5837.h>
 #include <Servo.h>
 #include <SparkFun_LSM6DSV16X.h>
@@ -36,11 +35,6 @@ constexpr uint8_t ULTRASONIC_ECHO_PIN = 9;
 constexpr uint8_t BALLAST_IN1 = 10;
 constexpr uint8_t BALLAST_IN2 = 11;
 
-// Hydrophones (conflict-free defaults; A1/A4 avoided — see spec)
-constexpr uint8_t PIEZO_PIN_0 = A0;
-constexpr uint8_t PIEZO_PIN_1 = A6;
-constexpr uint8_t PIEZO_PIN_2 = A2;
-constexpr uint8_t PIEZO_PIN_3 = A3;
 constexpr uint8_t BATTERY_PIN = A8;
 
 // Paired fins: set true to drive RUDDER_SERVO_2 / ELEVATOR_SERVO_2 with same µs
@@ -59,11 +53,10 @@ constexpr int ESC_NEUTRAL_US = 1500;
 constexpr int ESC_MIN_US = 1000;
 constexpr int ESC_MAX_US = 2000;
 
-// Audio: 5 kHz ISR, ring buffer >= 500 samples
-constexpr uint32_t AUDIO_ISR_PERIOD_US = 200;
-constexpr uint16_t AUDIO_BUFFER_SIZE = 512;
-constexpr uint16_t AUD_LINES_PER_LOOP_MAX = 50;
-constexpr int SERIAL_WRITE_HEADROOM = 1000;
+// Temporary bench test: gently drive main thruster (pin 2) at boot to verify ESC/motor path.
+constexpr bool TEST_MAIN_THRUSTER_ON_BOOT = true;
+constexpr int TEST_MAIN_THRUSTER_PCT = 10;                  // 10% -> 1550us
+constexpr unsigned long TEST_MAIN_THRUSTER_MS = 1200;       // short pulse for safe bench checks
 
 // Battery: 10-sample rolling average; divider ratio (tune for harness)
 constexpr uint8_t BAT_AVG_N = 10;
@@ -99,13 +92,6 @@ float batReadings[BAT_AVG_N];
 uint8_t batIdx = 0;
 bool batBufFilled = false;
 
-volatile uint16_t audioBuffer[AUDIO_BUFFER_SIZE][4];
-volatile uint16_t audioWriteIdx = 0;
-volatile uint16_t audioReadIdx = 0;  // main loop owns read index
-volatile bool audioOverrun = false;  // ISR sets when writer laps reader
-
-IntervalTimer audioTimer;
-
 unsigned long lastCmdMillis = 0;
 unsigned long lastTelemetryMillis = 0;
 bool firstCmdReceived = false;
@@ -122,7 +108,6 @@ size_t rxLineLen = 0;
 
 void applyActuatorsFromCommands();
 void setBallastFromDir(int dir);
-void audioIsr();
 
 static int clampInt(int v, int lo, int hi) {
   if (v < lo) return lo;
@@ -345,56 +330,6 @@ void sendTelemetryBlock() {
   JETSON_SERIAL.print('\n');
 }
 
-void flushAudioLines() {
-  for (uint16_t n = 0; n < AUD_LINES_PER_LOOP_MAX; ++n) {
-    if (JETSON_SERIAL.availableForWrite() < SERIAL_WRITE_HEADROOM) {
-      break;
-    }
-
-    noInterrupts();
-    const uint16_t w = audioWriteIdx;
-    if (audioOverrun) {
-      // Writer lapped reader: drop stale backlog, keep most recent samples.
-      audioReadIdx = static_cast<uint16_t>((w + 1) % AUDIO_BUFFER_SIZE);
-      audioOverrun = false;
-    }
-    const uint16_t r = audioReadIdx;
-    if (r == w) {
-      interrupts();
-      break;
-    }
-    const uint16_t c0 = audioBuffer[r][0];
-    const uint16_t c1 = audioBuffer[r][1];
-    const uint16_t c2 = audioBuffer[r][2];
-    const uint16_t c3 = audioBuffer[r][3];
-    audioReadIdx = static_cast<uint16_t>((r + 1) % AUDIO_BUFFER_SIZE);
-    interrupts();
-
-    JETSON_SERIAL.print(F("AUD,"));
-    JETSON_SERIAL.print(c0);
-    JETSON_SERIAL.print(',');
-    JETSON_SERIAL.print(c1);
-    JETSON_SERIAL.print(',');
-    JETSON_SERIAL.print(c2);
-    JETSON_SERIAL.print(',');
-    JETSON_SERIAL.print(c3);
-    JETSON_SERIAL.print('\n');
-  }
-}
-
-void audioIsr() {
-  const uint16_t w = audioWriteIdx;
-  const uint16_t next = static_cast<uint16_t>((w + 1) % AUDIO_BUFFER_SIZE);
-  if (next == audioReadIdx) {
-    audioOverrun = true;
-  }
-  audioBuffer[w][0] = static_cast<uint16_t>(analogRead(PIEZO_PIN_0));
-  audioBuffer[w][1] = static_cast<uint16_t>(analogRead(PIEZO_PIN_1));
-  audioBuffer[w][2] = static_cast<uint16_t>(analogRead(PIEZO_PIN_2));
-  audioBuffer[w][3] = static_cast<uint16_t>(analogRead(PIEZO_PIN_3));
-  audioWriteIdx = next;
-}
-
 void setup() {
   Serial.begin(SERIAL_BAUD);
   JETSON_SERIAL.begin(SERIAL_BAUD);
@@ -426,6 +361,17 @@ void setup() {
 
   delay(ESC_ARM_HOLD_MS);
 
+  if (TEST_MAIN_THRUSTER_ON_BOOT) {
+    mainThruster.writeMicroseconds(clampInt(mapPctToUs(TEST_MAIN_THRUSTER_PCT), ESC_MIN_US, ESC_MAX_US));
+    delay(TEST_MAIN_THRUSTER_MS);
+    mainThruster.writeMicroseconds(ESC_NEUTRAL_US);
+#if SERIAL_DEBUG
+    Serial.print(F("DBG,BOOT_MAIN_THR_TEST,"));
+    Serial.print(TEST_MAIN_THRUSTER_PCT);
+    Serial.print('\n');
+#endif
+  }
+
   Wire.begin();
   Wire.setClock(400000);
 
@@ -441,8 +387,6 @@ void setup() {
   for (uint8_t i = 0; i < BAT_AVG_N; ++i) {
     batReadings[i] = 0.0f;
   }
-
-  audioTimer.begin(audioIsr, AUDIO_ISR_PERIOD_US);
 
   lastCmdMillis = millis();
   lastTelemetryMillis = millis();
@@ -471,5 +415,4 @@ void loop() {
     sendTelemetryBlock();
   }
 
-  flushAudioLines();
 }
