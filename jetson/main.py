@@ -30,10 +30,27 @@ from typing import Optional
 # from audio.stream import AudioStreamReader
 # from audio.tdoa import estimate_bearing
 from comms.mock_comms import MockComms
-from comms.protocol import AudMsg, CmdMsg, EStopMsg, ModeMsg, ParsedMessage, StateMsg, clamp_cmd, serialize
+from comms.protocol import (
+    AudMsg,
+    BatMsg,
+    CmdMsg,
+    DepMsg,
+    EStopMsg,
+    ImuMsg,
+    ModeMsg,
+    ParsedMessage,
+    StateMsg,
+    UssMsg,
+    clamp_cmd,
+    serialize,
+)
 from comms.serial_comms import SerialComms
 from config import (
+    BACKEND_PORT,
     CAMERA_INDEX,
+    CAPTURE_CONFIDENCE_THRESHOLD,
+    CAPTURE_CONFIRM_FRAMES,
+    CAPTURE_COOLDOWN_S,
     CONTROL_BAUD,
     CONTROL_SERIAL_PORT,
     FRAME_HEIGHT,
@@ -45,6 +62,7 @@ from config import (
     TRACKER_LOST_HOLD_FRAMES,
     TRACKER_LOST_STOP_FRAMES,
     TRACKER_SMOOTHING_ALPHA,
+    TELEMETRY_PUSH_INTERVAL,
     UDP_LISTEN_HOST,
     UDP_LISTEN_PORT,
     VISION_CONF_THRESHOLD,
@@ -52,7 +70,9 @@ from config import (
     VISION_TARGET_CLASSES,
     YOLO_MODEL_NAME,
 )
+from http_sender import HttpSender
 from nav.target_follow import compute as target_follow_compute
+from vision.capture import DetectionCapture
 from vision.detector import Detector
 from vision.stream import VisionStream
 from vision.tracker import TrackState, Tracker
@@ -80,6 +100,10 @@ class ControlState:
     latest_bearing_deg: float = 0.0
     latest_det_class: str = "none"
     latest_det_conf: float = 0.0
+    latest_imu: Optional[ImuMsg] = None
+    latest_uss: Optional[UssMsg] = None
+    latest_bat: Optional[BatMsg] = None
+    latest_dep: Optional[DepMsg] = None
 
 
 def make_link(use_mock: bool) -> SerialComms | MockComms:
@@ -150,6 +174,7 @@ def vision_thread_fn(
     vision: VisionStream,
     out_q: "queue.Queue[TrackState]",
     stop: threading.Event,
+    capture: Optional[DetectionCapture] = None,
 ) -> None:
     """Tracker on top of ``VisionStream`` detections; pushes latest ``TrackState`` (drop-oldest if full)."""
     tracker = Tracker(
@@ -162,6 +187,8 @@ def vision_thread_fn(
     while not stop.is_set():
         detections = vision.get_detections()
         track = tracker.update(detections)
+        if capture is not None:
+            capture.update(track, vision.get_jpeg())
         try:
             out_q.put_nowait(track)
         except queue.Full:
@@ -209,11 +236,19 @@ def main(use_mock: bool) -> None:
         target_classes=list(VISION_TARGET_CLASSES),
     )
     vision.start()
+    sender = HttpSender()
+    capture = DetectionCapture(
+        sender=sender,
+        backend_url=f"http://{LAPTOP_IP}:{BACKEND_PORT}",
+        cooldown_s=CAPTURE_COOLDOWN_S,
+        confidence_threshold=CAPTURE_CONFIDENCE_THRESHOLD,
+        confirm_frames=CAPTURE_CONFIRM_FRAMES,
+    )
 
     vision_stop = threading.Event()
     vision_t = threading.Thread(
         target=vision_thread_fn,
-        args=(vision, vision_q, vision_stop),
+        args=(vision, vision_q, vision_stop, capture),
         daemon=True,
     )
 
@@ -226,6 +261,7 @@ def main(use_mock: bool) -> None:
     vision_t.start()
 
     print(f"Jetson main loop at {MAIN_LOOP_HZ:.1f}Hz, mock={use_mock}, MJPEG :{MJPEG_PORT}")
+    last_telemetry_push = 0.0
     try:
         while True:
             loop_start = time.time()
@@ -236,6 +272,14 @@ def main(use_mock: bool) -> None:
                     msg = ctrl_q.get_nowait()
                 except queue.Empty:
                     break
+                if isinstance(msg, ImuMsg):
+                    state.latest_imu = msg
+                elif isinstance(msg, UssMsg):
+                    state.latest_uss = msg
+                elif isinstance(msg, BatMsg):
+                    state.latest_bat = msg
+                elif isinstance(msg, DepMsg):
+                    state.latest_dep = msg
                 if dashboard_addr is not None:
                     udp_sock.sendto(serialize(msg).encode("ascii"), dashboard_addr)
 
@@ -286,6 +330,53 @@ def main(use_mock: bool) -> None:
                 # AUTO_WAYPOINT not yet implemented; fall back to manual
                 out_cmd = state.manual_cmd
 
+            # Push compact telemetry to laptop backend at 5Hz.
+            now = time.time()
+            if now - last_telemetry_push >= TELEMETRY_PUSH_INTERVAL:
+                last_telemetry_push = now
+                imu = state.latest_imu
+                uss = state.latest_uss
+                bat = state.latest_bat
+                dep = state.latest_dep
+                sender.post_json(
+                    f"http://{LAPTOP_IP}:{BACKEND_PORT}/api/ingest/telemetry",
+                    {
+                        "imu": (
+                            {
+                                "ax": imu.ax,
+                                "ay": imu.ay,
+                                "az": imu.az,
+                                "gx": imu.gx,
+                                "gy": imu.gy,
+                                "gz": imu.gz,
+                            }
+                            if imu is not None
+                            else {}
+                        ),
+                        "uss": (
+                            {
+                                "top": uss.top_cm,
+                                "left": uss.left_cm,
+                                "right": uss.right_cm,
+                                "front": uss.front_cm,
+                            }
+                            if uss is not None
+                            else {}
+                        ),
+                        "bat": ({"voltage": bat.voltage} if bat is not None else {}),
+                        "dep": ({"depth_m": dep.depth_m} if dep is not None else {}),
+                        "cmd": {
+                            "thruster": out_cmd.thruster_pct,
+                            "bow": out_cmd.bow_pct,
+                            "rudder": out_cmd.rudder_deg,
+                            "elevator": out_cmd.elevator_deg,
+                            "ballast": out_cmd.ballast_dir,
+                        },
+                        "mode": state.mode.value,
+                    },
+                    timeout=0.5,
+                )
+
             # 7) Forward to Control Teensy (watchdog expects periodic CMD)
             control_link.send_cmd(clamp_cmd(out_cmd))
 
@@ -311,6 +402,7 @@ def main(use_mock: bool) -> None:
         vision_stop.set()
         vision_t.join(timeout=2.0)
         vision.stop()
+        sender.close()
         control_link.close()
         udp_sock.close()
 

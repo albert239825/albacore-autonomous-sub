@@ -19,6 +19,7 @@ UDP_LISTEN_HOST = "0.0.0.0"
 UDP_LISTEN_PORT = 5005
 JETSON_IP = "192.168.1.50"
 LAPTOP_IP = "192.168.1.10"
+BACKEND_PORT = 5007
 UDP_RECV_BUFFER = 4096
 
 # --- Main loop: should match laptop/controller 20 Hz CMD heartbeat; watchdog matches Teensy firmware ---
@@ -45,6 +46,15 @@ TRACKER_SMOOTHING_ALPHA = 0.4
 TRACKER_ACQUIRE_FRAMES = 3
 TRACKER_LOST_HOLD_FRAMES = 8
 TRACKER_LOST_STOP_FRAMES = 20
+
+# Detection capture
+CAPTURE_COOLDOWN_S = 10.0
+CAPTURE_CONFIDENCE_THRESHOLD = 0.5
+CAPTURE_CONFIRM_FRAMES = 15
+
+# Telemetry push (Jetson -> laptop backend)
+TELEMETRY_PUSH_HZ = 5.0
+TELEMETRY_PUSH_INTERVAL = 1.0 / TELEMETRY_PUSH_HZ
 
 # --- Audio: nominal hydrophone sample rate from single Teensy (timer ISR); classifier resamples to 16 kHz ---
 AUDIO_SAMPLE_RATE_HZ = 5_000
