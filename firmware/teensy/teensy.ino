@@ -40,6 +40,20 @@ constexpr uint8_t BALLAST2_MOTOR1_PIN2 = 15;
 constexpr uint8_t BALLAST2_MOTOR2_PIN1 = 16;
 constexpr uint8_t BALLAST2_MOTOR2_PIN2 = 17;
 
+struct BallastMotorCfg {
+  uint8_t pin1;
+  uint8_t pin2;
+  bool invert;
+};
+
+// Keep one shared ballast_dir command; flip only channels with reversed wiring.
+constexpr BallastMotorCfg BALLAST_MOTORS[] = {
+  {BALLAST1_MOTOR1_PIN1, BALLAST1_MOTOR1_PIN2, false},
+  {BALLAST1_MOTOR2_PIN1, BALLAST1_MOTOR2_PIN2, false},
+  {BALLAST2_MOTOR1_PIN1, BALLAST2_MOTOR1_PIN2, false},
+  {BALLAST2_MOTOR2_PIN1, BALLAST2_MOTOR2_PIN2, false},
+};
+
 constexpr uint8_t BATTERY_PIN = A8;
 
 constexpr bool USE_PAIRED_RUDDER   = true;
@@ -138,18 +152,16 @@ static int mirrorPulseUs(int us) {
   return (2 * ESC_CENTER_US) - us;
 }
 
-static void setMotorDir(uint8_t pin1, uint8_t pin2, int dir) {
+static void setMotorDir(uint8_t pin1, uint8_t pin2, int dir, bool invert = false) {
+  dir = clampInt(dir, -1, 1);
+  if (invert) dir = -dir;
   // +1 forward, -1 reverse, 0 brake-low
   digitalWrite(pin1, (dir > 0) ? HIGH : LOW);
   digitalWrite(pin2, (dir < 0) ? HIGH : LOW);
 }
 
 void setBallastFromDir(int dir) {
-  dir = clampInt(dir, -1, 1);
-  setMotorDir(BALLAST1_MOTOR1_PIN1, BALLAST1_MOTOR1_PIN2, dir);
-  setMotorDir(BALLAST1_MOTOR2_PIN1, BALLAST1_MOTOR2_PIN2, dir);
-  setMotorDir(BALLAST2_MOTOR1_PIN1, BALLAST2_MOTOR1_PIN2, dir);
-  setMotorDir(BALLAST2_MOTOR2_PIN1, BALLAST2_MOTOR2_PIN2, dir);
+  for (const auto &m : BALLAST_MOTORS) setMotorDir(m.pin1, m.pin2, dir, m.invert);
 }
 
 void writeFinServosMicroseconds(int rudderUs, int elevatorUs) {
@@ -183,7 +195,7 @@ void applyWatchdogFailsafe() {
   cmdBowPct      = 0;
   cmdRudderDeg   = 0;
   cmdElevatorDeg = 0;
-  cmdBallastDir  = -1;   // ascend on comms loss
+  cmdBallastDir  = 0;   // ascend on comms loss, test: nothing
   applyActuatorsFromCommands();
 }
 
@@ -339,15 +351,11 @@ void setup() {
   if (USE_PAIRED_RUDDER)   rudderServo2.attach(RUDDER_SERVO_2_PIN);
   if (USE_PAIRED_ELEVATOR) elevatorServo2.attach(ELEVATOR_SERVO_2_PIN);
 
-  constexpr uint8_t ballastPins[] = {
-    BALLAST1_MOTOR1_PIN1, BALLAST1_MOTOR1_PIN2,
-    BALLAST1_MOTOR2_PIN1, BALLAST1_MOTOR2_PIN2,
-    BALLAST2_MOTOR1_PIN1, BALLAST2_MOTOR1_PIN2,
-    BALLAST2_MOTOR2_PIN1, BALLAST2_MOTOR2_PIN2,
-  };
-  for (auto p : ballastPins) {
-    pinMode(p, OUTPUT);
-    digitalWrite(p, LOW);
+  for (const auto &m : BALLAST_MOTORS) {
+    pinMode(m.pin1, OUTPUT);
+    pinMode(m.pin2, OUTPUT);
+    digitalWrite(m.pin1, LOW);
+    digitalWrite(m.pin2, LOW);
   }
 
   mainThruster.writeMicroseconds(ESC_NEUTRAL_US);
