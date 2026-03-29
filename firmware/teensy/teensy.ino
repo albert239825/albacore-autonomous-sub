@@ -55,6 +55,17 @@ constexpr unsigned long ULTRASONIC_ECHO_TIMEOUT_US = 25000;
 constexpr int ESC_NEUTRAL_US = 1500;
 constexpr int ESC_MIN_US     = 1000;
 constexpr int ESC_MAX_US     = 2000;
+constexpr int ESC_CENTER_US  = (ESC_MIN_US + ESC_MAX_US) / 2;
+
+// Optional per-servo trims (microseconds). Keep at 0 unless mechanical centering needs offset.
+constexpr int RUDDER_TRIM_US_1   = -80;
+constexpr int RUDDER_TRIM_US_2   = -80;
+constexpr int ELEVATOR_TRIM_US_1 = 0;
+constexpr int ELEVATOR_TRIM_US_2 = 0;
+
+// Opposite-side control surfaces should generally be mirrored.
+constexpr bool MIRROR_RUDDER_2   = true;
+constexpr bool MIRROR_ELEVATOR_2 = true;
 
 constexpr bool          TEST_MAIN_THRUSTER_ON_BOOT = true;
 constexpr int           TEST_MAIN_THRUSTER_PCT     = 10;
@@ -119,6 +130,14 @@ static int mapDegToUs(int deg) {
   return map(clampInt(deg, -45, 45), -45, 45, ESC_MIN_US, ESC_MAX_US);
 }
 
+static int clampPulseUs(int us) {
+  return clampInt(us, ESC_MIN_US, ESC_MAX_US);
+}
+
+static int mirrorPulseUs(int us) {
+  return (2 * ESC_CENTER_US) - us;
+}
+
 static void setMotorDir(uint8_t pin1, uint8_t pin2, int dir) {
   // +1 forward, -1 reverse, 0 brake-low
   digitalWrite(pin1, (dir > 0) ? HIGH : LOW);
@@ -134,12 +153,22 @@ void setBallastFromDir(int dir) {
 }
 
 void writeFinServosMicroseconds(int rudderUs, int elevatorUs) {
-  rudderUs   = clampInt(rudderUs,   ESC_MIN_US, ESC_MAX_US);
-  elevatorUs = clampInt(elevatorUs, ESC_MIN_US, ESC_MAX_US);
-  rudderServo.writeMicroseconds(rudderUs);
-  elevatorServo.writeMicroseconds(elevatorUs);
-  if (USE_PAIRED_RUDDER)   rudderServo2.writeMicroseconds(rudderUs);
-  if (USE_PAIRED_ELEVATOR) elevatorServo2.writeMicroseconds(elevatorUs);
+  const int rudder1Us = clampPulseUs(rudderUs + RUDDER_TRIM_US_1);
+  const int elevator1Us = clampPulseUs(elevatorUs + ELEVATOR_TRIM_US_1);
+
+  rudderServo.writeMicroseconds(rudder1Us);
+  elevatorServo.writeMicroseconds(elevator1Us);
+
+  if (USE_PAIRED_RUDDER) {
+    const int baseRudder2Us = MIRROR_RUDDER_2 ? mirrorPulseUs(rudder1Us) : rudder1Us;
+    const int rudder2Us = clampPulseUs(baseRudder2Us + RUDDER_TRIM_US_2);
+    rudderServo2.writeMicroseconds(rudder2Us);
+  }
+  if (USE_PAIRED_ELEVATOR) {
+    const int baseElevator2Us = MIRROR_ELEVATOR_2 ? mirrorPulseUs(elevator1Us) : elevator1Us;
+    const int elevator2Us = clampPulseUs(baseElevator2Us + ELEVATOR_TRIM_US_2);
+    elevatorServo2.writeMicroseconds(elevator2Us);
+  }
 }
 
 void applyActuatorsFromCommands() {
