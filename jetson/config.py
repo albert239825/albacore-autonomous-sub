@@ -17,7 +17,7 @@ SERIAL_TIMEOUT_S = 0.01
 # --- UDP: laptop commands and dashboard relay (see main.py for client port +1) ---
 UDP_LISTEN_HOST = "0.0.0.0"
 UDP_LISTEN_PORT = 5005
-JETSON_IP = "192.168.1.50"
+JETSON_IP = "192.168.0.204"
 LAPTOP_IP = "192.168.1.10"
 BACKEND_PORT = 5007
 UDP_RECV_BUFFER = 4096

@@ -9,7 +9,7 @@ Run (from repo root, venv active)::
     python laptop/controller.py --jetson-ip <JETSON_IP> --port 5005
 
 If ``jetson/main.py --mock`` runs on the **same machine** as this script, use
-``--jetson-ip 127.0.0.1`` (the default ``192.168.1.50`` will not reach the local
+``--jetson-ip 127.0.0.1`` (the default ``192.168.0.204`` will not reach the local
 mock and telemetry will stay empty).
 
 Requires a small pygame window to stay focused for keyboard events. Gamepad
@@ -236,7 +236,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Albacore laptop UDP controller.")
     parser.add_argument(
         "--jetson-ip",
-        default="192.168.1.50",
+        default="192.168.0.204",
         help="Jetson UDP address. Use 127.0.0.1 when jetson/main.py --mock runs on this machine.",
     )
     parser.add_argument("--port", type=int, default=5005)
