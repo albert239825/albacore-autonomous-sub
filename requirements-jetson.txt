@@ -3,7 +3,8 @@
 -r requirements.txt
 
 # Jetson Orin Nano / JetPack 6.2.x / CUDA 12.6 / Python 3.10
---extra-index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+--index-url https://pypi.jetson-ai-lab.io/jp6/cu126
+--extra-index-url https://pypi.org/simple
 
 torch==2.8.0
 torchvision==0.23.0
