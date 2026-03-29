@@ -20,6 +20,7 @@ from config import (
     TARGET_FOLLOW_LOST_STOP_FRAMES,
     TARGET_FOLLOW_RUDDER_KP,
     TARGET_FOLLOW_THRUSTER_KP,
+    TARGET_FOLLOW_THRUSTER_MAX_ABS,
 )
 from vision.tracker import TrackState
 
@@ -43,18 +44,21 @@ def compute(track: TrackState, frame_w: int, frame_h: int) -> CmdMsg:
     if not track.is_tracking:
         return CmdMsg(0, 0, 0, 0, 0)
 
+    thr_max = max(0, min(100, TARGET_FOLLOW_THRUSTER_MAX_ABS))
+    hold_thr = max(0, min(thr_max, TARGET_FOLLOW_HOLD_THRUSTER))
+
     if track.frames_lost > 0:
         if track.frames_lost <= TARGET_FOLLOW_LOST_HOLD_FRAMES:
-            return CmdMsg(TARGET_FOLLOW_HOLD_THRUSTER, 0, 0, 0, 0)
-        thr = TARGET_FOLLOW_HOLD_THRUSTER - (track.frames_lost - TARGET_FOLLOW_LOST_HOLD_FRAMES) * 3
-        return CmdMsg(max(0, thr), 0, 0, 0, 0)
+            return CmdMsg(hold_thr, 0, 0, 0, 0)
+        thr = hold_thr - (track.frames_lost - TARGET_FOLLOW_LOST_HOLD_FRAMES) * 3
+        return CmdMsg(_clamp_i(max(0, thr), 0, thr_max), 0, 0, 0, 0)
 
     error_x = (track.x - frame_w / 2.0) / frame_w
     frame_area = float(frame_w * frame_h)
     target_area = max(1e-9, track.w * track.h)
     area_ratio = target_area / frame_area
     size_error = area_ratio - TARGET_FOLLOW_DESIRED_AREA_RATIO
-    thruster_pct = _clamp_i(int(-size_error * TARGET_FOLLOW_THRUSTER_KP), -100, 100)
+    thruster_pct = _clamp_i(int(-size_error * TARGET_FOLLOW_THRUSTER_KP), -thr_max, thr_max)
 
     if abs(thruster_pct) <= TARGET_FOLLOW_BOW_SPEED_THRESHOLD:
         bow_pct = _clamp_i(int(error_x * TARGET_FOLLOW_BOW_KP), -100, 100)
