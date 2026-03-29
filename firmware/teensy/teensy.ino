@@ -22,7 +22,7 @@
 #endif
 
 // Jetson command/telemetry transport UART (set once here if EE remaps ports).
-#define JETSON_SERIAL Serial7
+#define JETSON_SERIAL Serial1
 
 // ── PIN ASSIGNMENTS (confirm with EE) ─────────────────────────────────────
 constexpr uint8_t MAIN_THRUSTER_PIN = 2;
@@ -31,8 +31,10 @@ constexpr uint8_t RUDDER_SERVO_PIN = 4;
 constexpr uint8_t RUDDER_SERVO_2_PIN = 5;
 constexpr uint8_t ELEVATOR_SERVO_PIN = 6;
 constexpr uint8_t ELEVATOR_SERVO_2_PIN = 7;
-// constexpr uint8_t BALLAST_IN1 = 9;
-// constexpr uint8_t BALLAST_IN2 = 10;
+constexpr uint8_t ULTRASONIC_TRIG_PIN = 8;
+constexpr uint8_t ULTRASONIC_ECHO_PIN = 9;
+constexpr uint8_t BALLAST_IN1 = 10;
+constexpr uint8_t BALLAST_IN2 = 11;
 
 // Hydrophones (conflict-free defaults; A1/A4 avoided — see spec)
 constexpr uint8_t PIEZO_PIN_0 = A0;
@@ -51,6 +53,7 @@ constexpr unsigned long SERIAL_BAUD = 1000000;
 constexpr unsigned long TELEMETRY_PERIOD_MS = 50;
 constexpr unsigned long WATCHDOG_TIMEOUT_MS = 500;
 constexpr unsigned long ESC_ARM_HOLD_MS = 2000;
+constexpr unsigned long ULTRASONIC_ECHO_TIMEOUT_US = 25000;
 
 constexpr int ESC_NEUTRAL_US = 1500;
 constexpr int ESC_MIN_US = 1000;
@@ -185,23 +188,19 @@ void applyWatchdogFailsafe() {
   setBallastFromDir(-1);
 }
 
-void drainUltrasonic(HardwareSerial &port, int *distanceCm) {
-  while (port.available() >= 4) {
-    int h = port.peek();
-    if (h != 0xFF) {
-      port.read();
-      continue;
-    }
-    uint8_t header = static_cast<uint8_t>(port.read());
-    (void)header;
-    uint8_t high = static_cast<uint8_t>(port.read());
-    uint8_t low = static_cast<uint8_t>(port.read());
-    uint8_t checksum = static_cast<uint8_t>(port.read());
-    if ((((0xFFU + high + low) & 0xFFU) == checksum)) {
-      uint16_t mm = (static_cast<uint16_t>(high) << 8) | low;
-      *distanceCm = static_cast<int>(mm / 10);
-    }
-  }
+int readUltrasonicCm(uint8_t trigPin, uint8_t echoPin) {
+  // HC-SR04 style timing: round trip µs / 58 ~= distance in cm.
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  const unsigned long pulse = pulseIn(echoPin, HIGH, ULTRASONIC_ECHO_TIMEOUT_US);
+  if (pulse == 0) return -1;
+
+  const int cm = static_cast<int>(pulse / 58UL);
+  return (cm > 0) ? cm : -1;
 }
 
 bool tryInitImu() {
@@ -401,6 +400,9 @@ void setup() {
   JETSON_SERIAL.begin(SERIAL_BAUD);
   analogReadResolution(12);
   pinMode(BATTERY_PIN, INPUT);
+  pinMode(ULTRASONIC_TRIG_PIN, OUTPUT);
+  pinMode(ULTRASONIC_ECHO_PIN, INPUT);
+  digitalWrite(ULTRASONIC_TRIG_PIN, LOW);
 
   mainThruster.attach(MAIN_THRUSTER_PIN);
   bowThruster.attach(BOW_THRUSTER_PIN);
@@ -423,11 +425,6 @@ void setup() {
   writeFinServosMicroseconds(ESC_NEUTRAL_US, ESC_NEUTRAL_US);
 
   delay(ESC_ARM_HOLD_MS);
-
-  Serial1.begin(9600);
-  Serial2.begin(9600);
-  Serial3.begin(9600);
-  Serial4.begin(9600);
 
   Wire.begin();
   Wire.setClock(400000);
@@ -465,13 +462,12 @@ void loop() {
 #endif
   }
 
-  drainUltrasonic(Serial1, &ussTopCm);
-  drainUltrasonic(Serial2, &ussLeftCm);
-  drainUltrasonic(Serial3, &ussRightCm);
-  drainUltrasonic(Serial4, &ussFrontCm);
-
   if (now - lastTelemetryMillis >= TELEMETRY_PERIOD_MS) {
     lastTelemetryMillis = now;
+    ussTopCm = readUltrasonicCm(ULTRASONIC_TRIG_PIN, ULTRASONIC_ECHO_PIN);
+    ussLeftCm = -1;
+    ussRightCm = -1;
+    ussFrontCm = -1;
     sendTelemetryBlock();
   }
 
