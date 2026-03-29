@@ -18,7 +18,7 @@ SERIAL_TIMEOUT_S = 0.01
 UDP_LISTEN_HOST = "0.0.0.0"
 UDP_LISTEN_PORT = 5005
 JETSON_IP = "192.168.0.204"
-LAPTOP_IP = "192.168.1.10"
+LAPTOP_IP = "192.168.0.238"
 BACKEND_PORT = 5007
 UDP_RECV_BUFFER = 4096
 
@@ -33,7 +33,7 @@ YOLO_MODEL_NAME = "yolov8n.pt"
 VISION_CONF_THRESHOLD = 0.25
 VISION_IOU_THRESHOLD = 0.45
 # Classes eligible for AUTO_TRACK (used by tracker + stream coloring).
-VISION_TARGET_CLASSES = ["cellphone", "cup"] 
+VISION_TARGET_CLASSES = ["cell phone", "cup"] 
 
 # Vision: MJPEG streaming + capture resolution
 MJPEG_PORT = 8080
