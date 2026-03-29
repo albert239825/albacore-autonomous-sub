@@ -5,6 +5,11 @@ serving the MJPEG feed from ``VisionStream``.
 
 Example:
     cd jetson && python -m vision.integration_test --log-hz 2
+
+Hardware (Teensy): ``--send-commands`` opens the control serial port and sends
+``CMD`` each tick (implies target-follow). Teensy watchdog expects periodic CMD.
+
+    cd jetson && python -m vision.integration_test --send-commands --serial-port /dev/ttyTHS1
 """
 
 from __future__ import annotations
@@ -13,10 +18,14 @@ import argparse
 import json
 import time
 from pathlib import Path
+from typing import Optional
 
-from comms.protocol import CmdMsg
+from comms.protocol import CmdMsg, clamp_cmd
+from comms.serial_comms import SerialComms
 from config import (
     CAMERA_INDEX,
+    CONTROL_BAUD,
+    CONTROL_SERIAL_PORT,
     FRAME_HEIGHT,
     FRAME_WIDTH,
     TRACKER_ACQUIRE_FRAMES,
@@ -115,6 +124,14 @@ def run(args: argparse.Namespace) -> None:
         jsonl_fp = out_path.open("w", encoding="utf-8")
         print(f"Writing tracker rows to: {out_path}")
 
+    link: Optional[SerialComms] = None
+    if args.send_commands:
+        link = SerialComms(args.serial_port, args.baud)
+        link.connect()
+        print(f"Serial CMD out: {args.serial_port} @ {args.baud} (Teensy watchdog: send every loop)")
+
+    use_target_follow = args.with_target_follow or args.send_commands
+
     vision.start()
     print(f"MJPEG stream: http://localhost:{args.mjpeg_port}")
     print(f"Target classes: {sorted(target_classes) if target_classes else 'ALL'}")
@@ -131,7 +148,11 @@ def run(args: argparse.Namespace) -> None:
             detections = vision.get_detections()
             track = tracker.update(detections)
             fps = vision.get_fps()
-            cmd = target_follow_compute(track, args.frame_width, args.frame_height) if args.with_target_follow else None
+            cmd = (
+                target_follow_compute(track, args.frame_width, args.frame_height) if use_target_follow else None
+            )
+            if link is not None and cmd is not None:
+                link.send_cmd(clamp_cmd(cmd))
 
             now = time.time()
             if now >= next_log_t:
@@ -163,6 +184,9 @@ def run(args: argparse.Namespace) -> None:
         pass
     finally:
         vision.stop()
+        if link is not None:
+            link.send_cmd(clamp_cmd(CmdMsg(0, 0, 0, 0, 0)))
+            link.close()
         if jsonl_fp is not None:
             jsonl_fp.close()
         print("Integration test stopped.")
@@ -180,6 +204,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--with-target-follow",
         action="store_true",
         help="Also compute and log target-follow CmdMsg from TrackState each tick.",
+    )
+    parser.add_argument(
+        "--send-commands",
+        action="store_true",
+        help="Send clamped CMD to Teensy over serial each tick (implies --with-target-follow).",
+    )
+    parser.add_argument(
+        "--serial-port",
+        type=str,
+        default=CONTROL_SERIAL_PORT,
+        help="Serial device for Teensy (default: config.CONTROL_SERIAL_PORT).",
+    )
+    parser.add_argument(
+        "--baud",
+        type=int,
+        default=CONTROL_BAUD,
+        help="Serial baud rate (default: config.CONTROL_BAUD).",
     )
     parser.add_argument(
         "--target-class",
