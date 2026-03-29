@@ -10,8 +10,8 @@ Dashboard UDP: laptop sends to ``UDP_LISTEN_PORT``; first packet sets relay
 address to ``(client_ip, UDP_LISTEN_PORT + 1)`` so telemetry and ``STATE`` lines
 match ``laptop/controller.py`` binding on port 5006.
 
-**Temporary:** COMMS-ONLY TEST MODE — audio TDOA, vision, nav, and auto modes are
-commented out below. Uncomment marked blocks when ready.
+Vision: ``VisionStream`` + ``Tracker`` feed ``AUTO_TRACK`` via ``target_follow.compute``.
+Audio TDOA remains optional / not wired here.
 """
 
 from __future__ import annotations
@@ -32,12 +32,30 @@ from typing import Optional
 from comms.mock_comms import MockComms
 from comms.protocol import AudMsg, CmdMsg, EStopMsg, ModeMsg, ParsedMessage, StateMsg, clamp_cmd, serialize
 from comms.serial_comms import SerialComms
-from config import CONTROL_BAUD, CONTROL_SERIAL_PORT, MAIN_LOOP_DT, MAIN_LOOP_HZ, UDP_LISTEN_HOST, UDP_LISTEN_PORT
-
-# from nav.target_follow import TargetFollowController
-# from nav.waypoint import WaypointNavigator
-# from vision.detector import Detection, YoloDetector
-# from vision.tracker import DetectionTracker
+from config import (
+    CAMERA_INDEX,
+    CONTROL_BAUD,
+    CONTROL_SERIAL_PORT,
+    FRAME_HEIGHT,
+    FRAME_WIDTH,
+    MAIN_LOOP_DT,
+    MAIN_LOOP_HZ,
+    MJPEG_PORT,
+    TRACKER_ACQUIRE_FRAMES,
+    TRACKER_LOST_HOLD_FRAMES,
+    TRACKER_LOST_STOP_FRAMES,
+    TRACKER_SMOOTHING_ALPHA,
+    UDP_LISTEN_HOST,
+    UDP_LISTEN_PORT,
+    VISION_CONF_THRESHOLD,
+    VISION_IOU_THRESHOLD,
+    VISION_TARGET_CLASSES,
+    YOLO_MODEL_NAME,
+)
+from nav.target_follow import compute as target_follow_compute
+from vision.detector import Detector
+from vision.stream import VisionStream
+from vision.tracker import TrackState, Tracker
 
 
 class Mode(str, Enum):
@@ -54,11 +72,11 @@ MAX_AUD_QUEUE = 4096
 
 @dataclass(slots=True)
 class ControlState:
-    """Shared state between the main loop and worker threads (vision updates detection)."""
+    """Shared state between the main loop and worker threads (vision updates track)."""
     mode: Mode = Mode.MANUAL
     manual_cmd: CmdMsg = field(default_factory=lambda: CmdMsg(0, 0, 0, 0, 0))
     estop: bool = False
-    # latest_detection: Optional[Detection] = None
+    latest_track: TrackState = field(default_factory=TrackState)
     latest_bearing_deg: float = 0.0
     latest_det_class: str = "none"
     latest_det_conf: float = 0.0
@@ -128,24 +146,34 @@ def serial_reader_thread(
             time.sleep(0.001)
 
 
-# def vision_thread_fn(
-#     out_q: "queue.Queue[Optional[Detection]]", stop: threading.Event, camera_index: int = 0
-# ) -> None:
-#     """YOLO + tracker on camera; pushes best tracked detection (or None) — slower than 20 Hz."""
-#     import cv2
-#
-#     detector = YoloDetector()
-#     tracker = DetectionTracker()
-#     cap = cv2.VideoCapture(camera_index)
-#     while not stop.is_set():
-#         ok, frame = cap.read()
-#         if not ok:
-#             time.sleep(0.01)
-#             continue
-#         detections = detector.detect(frame)
-#         state = tracker.update(detections)
-#         out_q.put(None if state is None else Detection(state.cls_name, state.confidence, state.xywh))
-#     cap.release()
+def vision_thread_fn(
+    vision: VisionStream,
+    out_q: "queue.Queue[TrackState]",
+    stop: threading.Event,
+) -> None:
+    """Tracker on top of ``VisionStream`` detections; pushes latest ``TrackState`` (drop-oldest if full)."""
+    tracker = Tracker(
+        smoothing_alpha=TRACKER_SMOOTHING_ALPHA,
+        acquire_frames=TRACKER_ACQUIRE_FRAMES,
+        lost_hold_frames=TRACKER_LOST_HOLD_FRAMES,
+        lost_stop_frames=TRACKER_LOST_STOP_FRAMES,
+        target_classes=list(VISION_TARGET_CLASSES),
+    )
+    while not stop.is_set():
+        detections = vision.get_detections()
+        track = tracker.update(detections)
+        try:
+            out_q.put_nowait(track)
+        except queue.Full:
+            try:
+                out_q.get_nowait()
+            except queue.Empty:
+                pass
+            try:
+                out_q.put_nowait(track)
+            except queue.Full:
+                pass
+        time.sleep(0.05)
 
 
 def main(use_mock: bool) -> None:
@@ -163,11 +191,31 @@ def main(use_mock: bool) -> None:
     udp_q: "queue.Queue[tuple[ParsedMessage, tuple[str, int]]]" = queue.Queue()
     ctrl_q: "queue.Queue[ParsedMessage]" = queue.Queue()
     aud_q: "queue.Queue[ParsedMessage]" = queue.Queue(maxsize=MAX_AUD_QUEUE)
-    # vision_q: "queue.Queue[Optional[Detection]]" = queue.Queue(maxsize=2)
+    vision_q: "queue.Queue[TrackState]" = queue.Queue(maxsize=2)
     state = ControlState()
 
-    # waypoint_nav = WaypointNavigator()
-    # follow_ctl = TargetFollowController(frame_width=640, frame_height=480)
+    detector = Detector(
+        model_name=YOLO_MODEL_NAME,
+        conf_threshold=VISION_CONF_THRESHOLD,
+        iou_threshold=VISION_IOU_THRESHOLD,
+        target_classes=list(VISION_TARGET_CLASSES),
+    )
+    vision = VisionStream(
+        camera_index=CAMERA_INDEX,
+        detector=detector,
+        frame_width=FRAME_WIDTH,
+        frame_height=FRAME_HEIGHT,
+        mjpeg_port=MJPEG_PORT,
+        target_classes=list(VISION_TARGET_CLASSES),
+    )
+    vision.start()
+
+    vision_stop = threading.Event()
+    vision_t = threading.Thread(
+        target=vision_thread_fn,
+        args=(vision, vision_q, vision_stop),
+        daemon=True,
+    )
 
     threads = [
         threading.Thread(target=udp_reader_thread, args=(udp_sock, udp_q, stop), daemon=True),
@@ -175,16 +223,9 @@ def main(use_mock: bool) -> None:
     ]
     for t in threads:
         t.start()
+    vision_t.start()
 
-    # vision_stop = threading.Event()
-    # vision_t = threading.Thread(target=vision_thread_fn, args=(vision_q, vision_stop), daemon=True)
-    # try:
-    #     vision_t.start()
-    # except Exception:
-    #     vision_t = None
-    vision_t = None
-
-    print(f"Jetson main loop (COMMS TEST) at {MAIN_LOOP_HZ:.1f}Hz, mock={use_mock}")
+    print(f"Jetson main loop at {MAIN_LOOP_HZ:.1f}Hz, mock={use_mock}, MJPEG :{MJPEG_PORT}")
     try:
         while True:
             loop_start = time.time()
@@ -218,38 +259,32 @@ def main(use_mock: bool) -> None:
                     state.estop = True
                 dashboard_addr = (src_addr[0], UDP_LISTEN_PORT + 1)
 
-            # # Latest vision result (AUTO_TRACK)
-            # while True:
-            #     try:
-            #         det = vision_q.get_nowait()
-            #     except queue.Empty:
-            #         break
-            #     state.latest_detection = det
-            #     if det is not None:
-            #         state.latest_det_class = det.cls_name
-            #         state.latest_det_conf = det.confidence
+            # Latest vision result (AUTO_TRACK + HUD)
+            while True:
+                try:
+                    track = vision_q.get_nowait()
+                except queue.Empty:
+                    break
+                state.latest_track = track
+                if track.is_tracking:
+                    state.latest_det_class = track.class_name
+                    state.latest_det_conf = track.confidence
+                else:
+                    state.latest_det_class = "none"
+                    state.latest_det_conf = 0.0
 
             # 4–6) Mode-dependent command (ESTOP overrides)
-            # COMMS TEST: always forward laptop CMD except ESTOP (auto branches below when enabled).
             if state.estop:
                 out_cmd = CmdMsg(0, 0, 0, 0, -1)
                 state.mode = Mode.MANUAL
                 state.estop = False
-            else:
+            elif state.mode == Mode.MANUAL:
                 out_cmd = state.manual_cmd
-            # elif state.mode == Mode.MANUAL:
-            #     out_cmd = state.manual_cmd
-            # elif state.mode == Mode.AUTO_WAYPOINT:
-            #     out_cmd = waypoint_nav.compute(
-            #         current_lat=39.95,
-            #         current_lon=-75.17,
-            #         current_heading_deg=0.0,
-            #         target_lat=39.951,
-            #         target_lon=-75.168,
-            #         dt=MAIN_LOOP_DT,
-            #     )
-            # else:
-            #     out_cmd = follow_ctl.update(state.latest_detection)
+            elif state.mode == Mode.AUTO_TRACK:
+                out_cmd = target_follow_compute(state.latest_track, FRAME_WIDTH, FRAME_HEIGHT)
+            else:
+                # AUTO_WAYPOINT not yet implemented; fall back to manual
+                out_cmd = state.manual_cmd
 
             # 7) Forward to Control Teensy (watchdog expects periodic CMD)
             control_link.send_cmd(clamp_cmd(out_cmd))
@@ -273,10 +308,9 @@ def main(use_mock: bool) -> None:
         print("Shutting down...")
     finally:
         stop.set()
-        # if vision_t is not None:
-        #     vision_stop.set()
-        #     vision_t.join(timeout=1.0)
-        # audio_reader.stop()
+        vision_stop.set()
+        vision_t.join(timeout=2.0)
+        vision.stop()
         control_link.close()
         udp_sock.close()
 

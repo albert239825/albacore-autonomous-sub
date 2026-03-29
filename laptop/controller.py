@@ -28,7 +28,7 @@ from typing import Optional
 import pygame
 
 
-MODES = ["MANUAL", "AUTO_WAYPOINT", "AUTO_TRACK"]
+MODES = ["MANUAL", "AUTO_TRACK"]
 HUD_TELEMETRY_ORDER = ("IMU", "USS", "BAT", "DEP", "STATE")
 
 
