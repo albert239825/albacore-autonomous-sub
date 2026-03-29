@@ -38,3 +38,4 @@ runs/
 
 # PlatformIO
 .pio
+.platformio-local/
