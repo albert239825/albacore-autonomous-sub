@@ -55,6 +55,7 @@ from config import (
     CONTROL_SERIAL_PORT,
     FRAME_HEIGHT,
     FRAME_WIDTH,
+    LAPTOP_IP,
     MAIN_LOOP_DT,
     MAIN_LOOP_HZ,
     MJPEG_PORT,
