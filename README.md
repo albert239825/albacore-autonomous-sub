@@ -125,7 +125,7 @@ uvicorn backend:app --host 0.0.0.0 --port 5007
 Optional environment overrides:
 
 ```bash
-JETSON_IP=192.168.0.204 JETSON_UDP_PORT=5005 uvicorn backend:app --host 0.0.0.0 --port 5007
+JETSON_IP=172.20.10.10 JETSON_UDP_PORT=5005 uvicorn backend:app --host 0.0.0.0 --port 5007
 ```
 
 ### 3) Build/serve dashboard

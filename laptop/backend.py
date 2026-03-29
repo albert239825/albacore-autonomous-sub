@@ -27,7 +27,7 @@ ROOT_DIR = Path(__file__).resolve().parent
 CAPTURES_DIR = ROOT_DIR / "captures"
 CAPTURES_DIR.mkdir(parents=True, exist_ok=True)
 
-JETSON_IP = os.getenv("JETSON_IP", "192.168.0.204")
+JETSON_IP = os.getenv("JETSON_IP", "172.20.10.10")
 JETSON_UDP_PORT = int(os.getenv("JETSON_UDP_PORT", "5005"))
 
 next_contact_num = 4
